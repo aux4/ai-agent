@@ -11,6 +11,16 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
+export class PromptError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "PromptError";
+    if (cause) {
+      this.cause = cause;
+    }
+  }
+}
+
 class Prompt {
   constructor(config = {}, toolsConfig = {}) {
     this.config = config;
@@ -83,6 +93,14 @@ class Prompt {
 
   setOutputSchema(schema) {
     this.outputSchema = schema;
+  }
+
+  setStreaming(enabled) {
+    this.streaming = enabled;
+  }
+
+  onToken(callback) {
+    this.tokenCallback = callback;
   }
 
   async message(text, params, role = "user") {
@@ -212,30 +230,28 @@ class Prompt {
     }
 
     try {
-      let response = await chain.invoke();
+      let response;
+
+      if (this.streaming && !this.outputSchema) {
+        response = await this._streamResponse(chain);
+      } else {
+        response = await chain.invoke();
+      }
 
       if (response.tool_calls && response.tool_calls.length > 0) {
         this.messages.push({ role: "assistant_with_tool", content: response });
 
+        // Pre-process saveImage tool calls to extract full base64 from previous tool responses
         for (const toolCall of response.tool_calls) {
-
-          const tool = this.tools[toolCall.name];
-
-          // Debug: Check if toolCall.args contains truncated content
           if (toolCall.args && typeof toolCall.args.content === "string" && toolCall.args.content.includes("...")) {
             console.error("WARNING: Tool call argument appears to be truncated:", toolCall.name, "content length:", toolCall.args.content.length);
           }
 
-          // Special handling for saveImage tool to extract full base64 from previous tool responses
           if (toolCall.name === "saveImage" && toolCall.args && toolCall.args.content && toolCall.args.content.includes("...")) {
-            // Look for the most recent tool response that contains base64 image data
             for (let i = this.messages.length - 1; i >= 0; i--) {
               const msg = this.messages[i];
               if (msg.role === "tool" && msg.content) {
-                // Check if this is an MCP tool response with image data
                 let fullBase64 = null;
-                
-                // Parse the content if it's a string (from MCP tools)
                 try {
                   if (typeof msg.content === "string") {
                     const parsed = JSON.parse(msg.content);
@@ -245,9 +261,7 @@ class Prompt {
                         fullBase64 = imageItem.image_url.url;
                       }
                     }
-                  }
-                  // Check simplified tool response format
-                  else if (msg.content.content) {
+                  } else if (msg.content.content) {
                     const parsed = JSON.parse(msg.content.content);
                     if (parsed.kwargs && parsed.kwargs.content && Array.isArray(parsed.kwargs.content)) {
                       const imageItem = parsed.kwargs.content.find(item => item.type === "image_url");
@@ -259,7 +273,6 @@ class Prompt {
                 } catch (e) {
                   // Not JSON, continue searching
                 }
-                
                 if (fullBase64) {
                   console.log("Found full base64 image data, replacing truncated content");
                   toolCall.args.content = fullBase64;
@@ -268,20 +281,23 @@ class Prompt {
               }
             }
           }
-
-          const toolResponse = await tool.invoke(toolCall.args);
-
-          // Store the tool message as raw object (consistent with other message storage)
-          const rawToolMessage = {
-            role: "tool",
-            content: toolResponse,
-            tool_call_id: toolCall.id,
-            name: toolCall.name
-          };
-
-          // Store the tool message as raw object
-          this.messages.push(rawToolMessage);
         }
+
+        // Execute all tool calls in parallel
+        const toolResults = await Promise.all(
+          response.tool_calls.map(async (toolCall) => {
+            const tool = this.tools[toolCall.name];
+            const toolResponse = await tool.invoke(toolCall.args);
+            return {
+              role: "tool",
+              content: toolResponse,
+              tool_call_id: toolCall.id,
+              name: toolCall.name
+            };
+          })
+        );
+
+        this.messages.push(...toolResults);
 
         return await this.execute();
       }
@@ -346,8 +362,30 @@ class Prompt {
           console.error("Error writing history file after error:", historyError.message);
         }
       }
-      return e.message;
+      throw new PromptError(e.message, e);
     }
+  }
+
+  async _streamResponse(chain) {
+    let accumulated = null;
+    const stream = await chain.stream();
+
+    for await (const chunk of stream) {
+      if (!accumulated) {
+        accumulated = chunk;
+      } else {
+        accumulated = accumulated.concat(chunk);
+      }
+
+      if (this.tokenCallback && chunk.content) {
+        const text = typeof chunk.content === "string" ? chunk.content : "";
+        if (text) {
+          this.tokenCallback(text);
+        }
+      }
+    }
+
+    return accumulated;
   }
 
   onMessage(callback) {

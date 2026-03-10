@@ -1,4 +1,4 @@
-import Prompt from "../../lib/Prompt.js";
+import Prompt, { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
 
@@ -12,6 +12,7 @@ export async function askExecutor(params) {
     const outputSchema = params.outputSchema;
     const context = params.context;
     const storage = params.storage;
+    const stream = params.stream;
 
     let contextContent;
     if (context === true || context === "true") {
@@ -31,12 +32,21 @@ export async function askExecutor(params) {
     if (instructions) {
       await prompt.instructions(await readFile(instructions), params);
     }
+    await prompt.instructions("If you need to ask the user a question or need clarification, use the askUser tool. Always call askUser alone, never in parallel with other tools.");
 
     await prompt.history(history);
 
-    prompt.onMessage(answer => {
-      console.log(answer.trim());
-    });
+    if (stream === true || stream === "true") {
+      prompt.setStreaming(true);
+      prompt.onToken(token => process.stdout.write(token));
+      prompt.onMessage(answer => {
+        process.stdout.write("\n");
+      });
+    } else {
+      prompt.onMessage(answer => {
+        console.log(answer.trim());
+      });
+    }
 
     prompt.setOutputSchema(await readFile(outputSchema).then(asJson()));
 
@@ -44,10 +54,14 @@ export async function askExecutor(params) {
 
     prompt.close();
   } catch (error) {
-    console.error("Error in askExecutor:");
-    console.error("Message:", error.message);
-    console.error("Stack trace:");
-    console.error(error.stack);
+    if (error instanceof PromptError) {
+      console.error("Prompt error:", error.message);
+    } else {
+      console.error("Error in askExecutor:");
+      console.error("Message:", error.message);
+      console.error("Stack trace:");
+      console.error(error.stack);
+    }
     throw error;
   }
 }

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import readline from "node:readline";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import LlmStore from "./LlmStore.js";
@@ -16,9 +17,14 @@ import executeAux4Desc from "../docs/tools/executeAux4.md?raw";
 import saveImageDesc from "../docs/tools/saveImage.md?raw";
 import removeFilesDesc from "../docs/tools/removeFiles.md?raw";
 import searchContextDesc from "../docs/tools/searchContext.md?raw";
+import searchFilesDesc from "../docs/tools/searchFiles.md?raw";
+import askUserDesc from "../docs/tools/askUser.md?raw";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
+
+// Serialization queue for askUser to prevent parallel stdin conflicts
+let askUserQueue = Promise.resolve();
 
 // Helper function to expand ~ to home directory
 function expandTildePath(filePath) {
@@ -367,6 +373,128 @@ export const removeFilesTool = tool(
   }
 );
 
+export const searchFilesTool = tool(
+  async ({ pattern, path: targetPath, include = "", exclude = "", maxResults = 50 }) => {
+    try {
+      const currentDirectory = process.cwd();
+      const expandedPath = expandTildePath(targetPath || currentDirectory);
+      const directory = path.resolve(expandedPath);
+
+      if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
+      if (!fs.existsSync(directory)) return "Directory not found";
+
+      const includeExtensions = include ? include.split(",").map(ext => ext.trim().toLowerCase()) : [];
+      const excludePrefixes = exclude ? exclude.split(",").map(p => p.trim()) : [];
+      const lowerPattern = pattern.toLowerCase();
+      const results = [];
+
+      function searchDir(dir) {
+        if (results.length >= maxResults) return;
+
+        let entries;
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+
+        for (const entry of entries) {
+          if (results.length >= maxResults) return;
+
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(currentDirectory, fullPath);
+
+          if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
+
+          if (entry.isDirectory()) {
+            searchDir(fullPath);
+          } else if (entry.isFile()) {
+            if (includeExtensions.length > 0) {
+              const ext = path.extname(entry.name).slice(1).toLowerCase();
+              if (!includeExtensions.includes(ext)) continue;
+            }
+
+            try {
+              const content = fs.readFileSync(fullPath, { encoding: "utf-8" });
+              const lines = content.split("\n");
+              for (let i = 0; i < lines.length; i++) {
+                if (results.length >= maxResults) return;
+                if (lines[i].toLowerCase().includes(lowerPattern)) {
+                  results.push(`${relPath}:${i + 1}: ${lines[i]}`);
+                }
+              }
+            } catch {
+              // Skip binary or unreadable files
+            }
+          }
+        }
+      }
+
+      searchDir(directory);
+
+      if (results.length === 0) return "No matches found";
+      return results.join("\n");
+    } catch (e) {
+      if (e.code === "ENOENT") return "Directory not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "searchFiles",
+    description: searchFilesDesc,
+    schema: z.object({
+      pattern: z.string(),
+      path: z.string().optional(),
+      include: z.string().optional(),
+      exclude: z.string().optional(),
+      maxResults: z.number().optional()
+    })
+  }
+);
+
+export const createAskUserTool = () => tool(
+  async ({ question }) => {
+    if (!process.stdin.isTTY) {
+      return "Non-interactive session detected (no TTY). Proceed with your best judgment based on the available context.";
+    }
+
+    const ask = () => new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stderr
+      });
+      process.stderr.write(`\n🤖 ${question}\n> `);
+      rl.on("line", (answer) => {
+        rl.close();
+        resolve(answer);
+      });
+      rl.on("close", () => {
+        resolve("");
+      });
+    });
+
+    // Serialize concurrent calls to avoid stdin conflicts
+    const result = new Promise((resolve) => {
+      askUserQueue = askUserQueue.then(async () => {
+        const answer = await ask();
+        resolve(`User responded: ${answer}`);
+      });
+    });
+
+    return result;
+  },
+  {
+    name: "askUser",
+    description: askUserDesc,
+    schema: z.object({
+      question: z.string()
+    })
+  }
+);
+
+export const askUserTool = createAskUserTool();
+
 export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig = {}) => tool(
   async ({ query, storage, limit = 5, source, embeddingsType = "openai", embeddingsConfig = {} }) => {
     try {
@@ -450,10 +578,12 @@ export function createTools(config = {}) {
     editFile: editLocalFileTool,
     saveImage: saveImageTool,
     listFiles: listFilesTool,
+    searchFiles: searchFilesTool,
     createDirectory: createDirectoryTool,
     removeFiles: removeFilesTool,
     executeAux4: executeAux4CliTool,
-    searchContext: createSearchContextTool(storage, embeddingsConfig)
+    searchContext: createSearchContextTool(storage, embeddingsConfig),
+    askUser: createAskUserTool()
   };
 }
 
@@ -463,10 +593,12 @@ const Tools = {
   editFile: editLocalFileTool,
   saveImage: saveImageTool,
   listFiles: listFilesTool,
+  searchFiles: searchFilesTool,
   createDirectory: createDirectoryTool,
   removeFiles: removeFilesTool,
   executeAux4: executeAux4CliTool,
-  searchContext: searchContextTool
+  searchContext: searchContextTool,
+  askUser: askUserTool
 };
 
 export default Tools;

@@ -125,7 +125,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(instructions, role, history, outputSchema, question, image, context, model, storage)"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(instructions, role, history, outputSchema, question, image, context, model, storage, stream)"
           ],
           "help": {
             "text": "Ask your question",
@@ -164,6 +164,11 @@
                 "name": "storage",
                 "text": "The storage directory",
                 "default": ".llm"
+              },
+              {
+                "name": "stream",
+                "text": "Enable streaming output",
+                "default": "false"
               },
               {
                 "name": "question",
