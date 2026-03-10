@@ -59,6 +59,7 @@ Key variables (from the package help):
 - context (default: "false") — read additional context from stdin (set to true to pipe context).
 - image (default: "") — path(s) to image(s) to attach (comma-separated if multiple).
 - storage (default: .llm) — the storage directory for the vector store.
+- stream (default: "false") — enable streaming output (tokens are printed as they arrive).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples (from tests):
@@ -79,10 +80,17 @@ aux4 ai agent ask "Can you see geometric shapes in this image? Answer only yes o
 
 The test expects a partial response "yes".
 
+3) Streaming output (tokens print as they arrive):
+
+```bash
+aux4 ai agent ask --config --stream true --question "Explain what AI agents are in two sentences."
+```
+
 Notes:
 - Use --config when you want the agent to use the configured instructions file (instructions.md) as in the tests.
 - The question can be provided via the --question flag or as a final positional argument.
 - Provide multiple image paths separated by commas if needed.
+- Use `--stream true` for real-time token output — useful for long responses or interactive workflows.
 
 For more details see [aux4 ai agent ask](./commands/ai/agent/ask).
 
@@ -309,6 +317,38 @@ Notes:
 - When quantity > 1, files are created with numbered prefixes (e.g., 1-multi-test.png, 2-multi-test.png, ...).
 
 For more details see [aux4 ai agent image](./commands/ai/agent/image).
+
+---
+
+## Built-in Tools
+
+The agent comes with a set of built-in tools that the LLM can call during execution. These tools run locally and are always available:
+
+| Tool | Description |
+|------|-------------|
+| `readFile` | Read the contents of a text file |
+| `writeFile` | Create or overwrite a file |
+| `editFile` | Perform partial string replacements in a file |
+| `listFiles` | List files in a directory |
+| `searchFiles` | Search file contents for a text pattern |
+| `createDirectory` | Create a new directory |
+| `removeFiles` | Remove files or directories created by the agent |
+| `saveImage` | Save a base64-encoded image to disk |
+| `executeAux4` | Run any aux4 command |
+| `searchContext` | Query the local vector store for relevant context |
+| `askUser` | Ask the user a question and wait for their typed response |
+
+### askUser
+
+The `askUser` tool lets the agent prompt the user interactively when it needs clarification, a preference, or a decision before proceeding. The question is displayed on stderr and the user types their response on stdin.
+
+**Non-interactive sessions:** When no TTY is available (e.g., piped input), the tool returns a message telling the agent to proceed with its best judgment.
+
+**Note:** The agent is instructed to always call `askUser` alone, never in parallel with other tools, to avoid stdin conflicts.
+
+### searchFiles
+
+The `searchFiles` tool performs a case-insensitive text search across project files. It supports filtering by file extension, excluding directories, and limiting results. The agent uses this to find relevant code or content without reading every file.
 
 ---
 
