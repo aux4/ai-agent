@@ -55,7 +55,7 @@ Key variables (from the package help):
 - instructions (default: instructions.md) — prompt instructions file to shape the assistant.
 - role (default: user) — role used in the prompt.
 - history (default: "") — a history file to seed the conversation.
-- outputSchema (default: schema.json) — path to a JSON schema to constrain structured outputs.
+- outputSchema (default: schema.json) — path to a JSON file defining the structured output format (see [Output Schema](#output-schema)).
 - context (default: "false") — read additional context from stdin (set to true to pipe context).
 - image (default: "") — path(s) to image(s) to attach (comma-separated if multiple).
 - storage (default: .llm) — the storage directory for the vector store.
@@ -429,6 +429,64 @@ Notes:
 For more details see the related command docs:
 - The example tool command is available at [aux4 print-name](./commands/print-name) after installing or configuring it locally.
 - Agent calls are documented under [aux4 ai agent ask](./commands/ai/agent/ask) and [aux4 ai agent history](./commands/ai/agent/history).
+
+---
+
+## Output Schema
+
+The `--outputSchema` parameter accepts a path to a JSON file that defines the structure of the agent's response. Each key is a field name and each value is an object with a `type` and `description`:
+
+```json
+{
+  "fieldName": { "type": "string", "description": "Description of this field" },
+  "count": { "type": "number", "description": "A numeric value" },
+  "active": { "type": "boolean", "description": "Whether active" }
+}
+```
+
+### Supported Types
+
+| Type | Description | Extra Fields |
+|------|-------------|--------------|
+| `string` | Text value | — |
+| `number` | Numeric value | — |
+| `boolean` | True/false value | — |
+| `array` | List of values | `items` — element type (e.g. `"string"`) |
+| `enum` | One of a fixed set of values | `values` — array of allowed strings |
+
+### Example
+
+schema.json:
+```json
+{
+  "name": { "type": "string", "description": "The person's full name" },
+  "age": { "type": "number", "description": "The person's age" },
+  "employed": { "type": "boolean", "description": "Whether the person is employed" },
+  "skills": { "type": "array", "items": "string", "description": "List of skills" },
+  "role": { "type": "enum", "values": ["engineer", "manager", "designer"], "description": "Job role" }
+}
+```
+
+```bash
+aux4 ai agent ask "Tell me about John Doe" --outputSchema schema.json --config
+```
+
+Response:
+```json
+{
+  "name": "John Doe",
+  "age": 30,
+  "employed": true,
+  "skills": ["Go", "JavaScript"],
+  "role": "engineer"
+}
+```
+
+### Notes
+
+- Fields are returned with their actual types (booleans, numbers, etc.) — no string coercion needed.
+- The agent injects format instructions into the prompt automatically, telling the LLM to respond with JSON matching the schema.
+- Streaming (`--stream true`) is disabled when an output schema is set, since the full response must be parsed as JSON.
 
 ---
 

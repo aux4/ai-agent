@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { StructuredOutputParser } from "@langchain/core/output_parsers";
+
 import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { getModel } from "./Models.js";
 import { readFile, asJson } from "./util/FileUtils.js";
+import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
@@ -147,9 +148,18 @@ class Prompt {
     if (!Array.isArray(this.messages)) {
       throw new Error(`Messages is not an array: ${typeof this.messages}`);
     }
-    
+
+    let messages = this.messages;
+
+    if (this.outputSchema) {
+      const schemaJson = JSON.stringify(this.outputSchema, null, 2);
+      const formatInstructions = `You MUST respond with ONLY a valid JSON object. No other text, no markdown, no code blocks, no explanation.\nYour response must match this schema:\n${schemaJson}`;
+      const formatMsg = { role: "system", content: formatInstructions };
+      messages = [...this.messages.slice(0, -1), formatMsg, this.messages[this.messages.length - 1]];
+    }
+
     const promptTemplate = ChatPromptTemplate.fromMessages(
-      this.messages.map((message, index) => {
+      messages.map((message, index) => {
         try {
           const content = [];
 
@@ -224,10 +234,8 @@ class Prompt {
 
     let chain = promptTemplate.pipe(this.model);
 
-    if (this.outputSchema) {
-      const parser = StructuredOutputParser.fromNamesAndDescriptions(this.outputSchema);
-      chain = chain.pipe(parser);
-    }
+
+
 
     try {
       let response;
@@ -302,12 +310,26 @@ class Prompt {
         return await this.execute();
       }
 
-      const answer =
+      let answer =
         typeof response === "string"
           ? response
           : typeof response.content === "string"
             ? response.content
-            : JSON.stringify(response);
+            : Array.isArray(response.content)
+              ? response.content.filter(c => c.type === "text").map(c => c.text).join("") || JSON.stringify(response)
+              : JSON.stringify(response);
+
+      if (this.outputSchema) {
+        let jsonStr = answer.trim();
+        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+        if (codeBlockMatch) {
+          jsonStr = codeBlockMatch[1].trim();
+        }
+        const zodSchema = buildZodSchema(this.outputSchema);
+        const parsed = zodSchema.parse(JSON.parse(jsonStr));
+        answer = JSON.stringify(parsed);
+      }
+
       this.messages.push({ role: "assistant", content: answer });
 
       if (this.historyFile) {
