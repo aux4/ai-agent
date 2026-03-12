@@ -25,7 +25,7 @@ aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--
 --outputSchema   JSON schema file to constrain structured output (default: schema.json)
 --context        Read additional context from stdin (default: false)
 --image          Image path(s), comma-separated for multiple (default: "")
---storage        Storage directory for the vector store (default: .llm)
+--storage        Storage directory for the vector store (default: .context)
 --stream         Enable streaming token output (default: false)
 question         The question to ask (positional argument)
 

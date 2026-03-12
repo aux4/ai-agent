@@ -10,7 +10,7 @@ Describe the main parameters and options of the command.
 aux4 ai agent search [--storage <path>] [--format <text|json>] [--source <file-path>] [--limit <n>] <query>
 ```
 
-- storage: The storage directory containing the vector store (default: .llm).
+- storage: The storage directory containing the vector store (default: .context).
 - format: Output format, either text (default) or json.
 - source: Optional source file path to limit results to a specific document.
 - limit: Number of results to return (default: 1).

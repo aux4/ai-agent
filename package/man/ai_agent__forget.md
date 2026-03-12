@@ -1,16 +1,17 @@
 #### Description
 
-Remove the local vector store files to forget all previously learned documents. This deletes the docstore, FAISS index, and ID mapping files from the storage directory. After running forget, searches will report that no documents have been indexed.
+Remove learned documents from the vector store. When called without arguments, deletes all store files (docstore, FAISS index, and ID mapping) to forget everything. When given a file or folder path, selectively removes only the embeddings for that file or all files under that folder, preserving the rest of the store.
 
-Use this command to reset the agent's knowledge base, for example when starting fresh or during testing.
+Use this command to reset the agent's knowledge base or to selectively remove specific documents.
 
 #### Usage
 
 ```bash
-aux4 ai agent forget [--storage <dir>]
+aux4 ai agent forget [<doc>] [--storage <dir>]
 ```
 
---storage   Storage directory containing the vector store (default: .llm)
+- doc (positional, optional): File or folder path to forget. If omitted, forgets all documents.
+- --storage: Storage directory containing the vector store (default: .context).
 
 #### Example
 
@@ -20,8 +21,16 @@ Forget all learned documents:
 aux4 ai agent forget
 ```
 
-Subsequent searches will return:
+Forget a specific file:
 
-```text
-No documents have been indexed yet. Please use 'aux4 ai agent learn <document>' to add documents to the vector store first.
+```bash
+aux4 ai agent forget notes.txt
 ```
+
+Forget all files learned from a folder:
+
+```bash
+aux4 ai agent forget ./docs/
+```
+
+Subsequent searches for forgotten content will no longer return results.

@@ -16,7 +16,7 @@ aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [-
 --outputSchema   JSON schema file for structured output (default: schema.json)
 --context        Read additional context from stdin (default: false)
 --image          Image path(s), comma-separated (default: "")
---storage        Storage directory for the vector store (default: .llm)
+--storage        Storage directory for the vector store (default: .context)
 --model          Model configuration JSON (default: {})
 text             Initial text to send (positional argument)
 

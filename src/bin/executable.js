@@ -15,6 +15,7 @@ process.emitWarning = function(warning, type, code) {
 
 import { addDocumentExecutor } from "./commands/AddDocumentExecutor.js";
 import { searchExecutor } from "./commands/SearchExecutor.js";
+import { forgetExecutor } from "./commands/ForgetExecutor.js";
 import { askExecutor } from "./commands/AskExecutor.js";
 import { imageExecutor } from "./commands/ImageExecutor.js";
 import { historyExecutor } from "./commands/HistoryExecutor.js";
@@ -30,7 +31,7 @@ process.title = "aux4-agent";
 
     if (!command) {
       console.log("Usage: aux4-agent <command> [options]");
-      console.log("Commands: learn, search, ask, image, history");
+      console.log("Commands: learn, search, forget, ask, image, history");
       process.exit(1);
     }
 
@@ -49,6 +50,12 @@ process.title = "aux4-agent";
         limit: parseInt(args[4]),
         query: args[5],
         embeddings: JSON.parse(args[6] || "{}")
+      });
+    } else if (command === "forget") {
+      await forgetExecutor({
+        storage: args[1],
+        doc: args[2],
+        embeddings: JSON.parse(args[3] || "{}")
       });
     } else if (command === "ask") {
       await askExecutor({
@@ -79,7 +86,7 @@ process.title = "aux4-agent";
       });
     } else {
       console.error(`Unknown command: ${command}`.red);
-      console.log("Available commands: learn, search, ask, image, history");
+      console.log("Available commands: learn, search, forget, ask, image, history");
       process.exit(1);
     }
   } catch (e) {

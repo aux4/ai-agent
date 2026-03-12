@@ -1,11 +1,11 @@
 # learn
 
 ```beforeAll
-rm -rf .llm
+rm -rf .context
 ```
 
 ```afterAll
-rm -rf .llm france.txt
+rm -rf .context france.txt capitals/
 ```
 
 ```execute
@@ -82,4 +82,65 @@ aux4 ai agent search "What is the capital of France?"
 
 ```expect
 Capital of France is Paris
+```
+
+## Learn a folder
+
+```execute
+rm -rf .context
+mkdir -p capitals
+echo "Capital of Italy is Rome" > capitals/italy.txt
+echo "Capital of Germany is Berlin" > capitals/germany.txt
+```
+
+```execute
+aux4 ai agent learn capitals/
+```
+
+### Test Italy from folder
+
+```execute
+aux4 ai agent search "What is the capital of Italy?"
+```
+
+```expect
+Capital of Italy is Rome
+```
+
+### Test Germany from folder
+
+```execute
+aux4 ai agent search "What is the capital of Germany?"
+```
+
+```expect
+Capital of Germany is Berlin
+```
+
+## Re-learn unchanged file should skip
+
+```execute
+aux4 ai agent learn capitals/italy.txt
+```
+
+```output
+Skipped (unchanged)
+```
+
+## Re-learn changed file should re-embed
+
+```execute
+echo "Capital of Italy is Milan" > capitals/italy.txt
+```
+
+```execute
+aux4 ai agent learn capitals/italy.txt
+```
+
+```execute
+aux4 ai agent search "What is the capital of Italy?"
+```
+
+```expect
+Capital of Italy is Milan
 ```

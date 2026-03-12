@@ -46,16 +46,16 @@
             "node ${packageDir}/lib/aux4-ai-agent.cjs learn values(storage, doc, type)"
           ],
           "help": {
-            "text": "Learn about a document",
+            "text": "Learn from a document or folder",
             "variables": [
               {
                 "name": "storage",
                 "text": "The storage directory",
-                "default": ".llm"
+                "default": ".context"
               },
               {
                 "name": "doc",
-                "text": "The document to learn from",
+                "text": "The document or folder to learn from",
                 "arg": true
               },
               {
@@ -77,7 +77,7 @@
               {
                 "name": "storage",
                 "text": "The storage directory",
-                "default": ".llm"
+                "default": ".context"
               },
               {
                 "name": "format",
@@ -109,15 +109,21 @@
         {
           "name": "forget",
           "execute": [
-            "rm -f ${storage}/docstore.json ${storage}/faiss.index ${forget}/ids.json"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs forget values(storage, doc)"
           ],
           "help": {
-            "text": "Forget about the learned documents",
+            "text": "Forget learned documents",
             "variables": [
               {
                 "name": "storage",
-                "text": "storage directory",
-                "default": ".llm"
+                "text": "The storage directory",
+                "default": ".context"
+              },
+              {
+                "name": "doc",
+                "text": "File or folder to forget (all if omitted)",
+                "default": "",
+                "arg": true
               }
             ]
           }
@@ -163,7 +169,7 @@
               {
                 "name": "storage",
                 "text": "The storage directory",
-                "default": ".llm"
+                "default": ".context"
               },
               {
                 "name": "stream",
@@ -275,7 +281,7 @@
               {
                 "name": "storage",
                 "text": "The storage directory",
-                "default": ".llm"
+                "default": ".context"
               },
               {
                 "name": "model",

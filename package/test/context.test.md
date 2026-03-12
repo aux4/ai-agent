@@ -1,11 +1,11 @@
 # context
 
 ```beforeAll
-rm -rf .llm
+rm -rf .context
 ```
 
 ```afterAll
-rm -rf .llm
+rm -rf .context
 ```
 
 ```file:context-1.txt

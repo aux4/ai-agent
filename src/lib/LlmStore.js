@@ -1,8 +1,19 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { FaissStore } from "@langchain/community/vectorstores/faiss";
 import { getDocLoader } from "./DocLoaders.js";
 import { getDocSplitter } from "./DocSplitters.js";
+
+function computeMd5(filePath) {
+  const content = fs.readFileSync(filePath);
+  return crypto.createHash("md5").update(content).digest("hex");
+}
+
+function getChunks(entry) {
+  if (Array.isArray(entry)) return entry;
+  return entry.chunks || [];
+}
 
 export default class LlmStore {
   constructor(directory, embeddings) {
@@ -28,15 +39,25 @@ export default class LlmStore {
     }
 
     const idsMap = await getIdsMap(this.directory);
+    const md5 = computeMd5(docPath);
 
-    if (this.store && idsMap[docPath]) {
-      try {
-        await this.store.delete({ ids: idsMap[docPath] });
-      } catch {
-      } finally {
-        delete idsMap[docPath];
-        await saveIdsMap(this.directory, idsMap);
+    const existing = idsMap[docPath];
+    if (existing) {
+      const existingMd5 = Array.isArray(existing) ? null : existing.md5;
+      if (existingMd5 && existingMd5 === md5) {
+        console.log(`Skipped (unchanged): ${docPath}`);
+        return;
       }
+
+      // MD5 differs or old format — delete old chunks and re-embed
+      if (this.store) {
+        try {
+          await this.store.delete({ ids: getChunks(existing) });
+        } catch {
+        }
+      }
+      delete idsMap[docPath];
+      await saveIdsMap(this.directory, idsMap);
     }
 
     const Loader = getDocLoader(type);
@@ -79,9 +100,39 @@ export default class LlmStore {
       await this.store.addDocuments(chunks, { ids: chunkIds });
     }
 
-    idsMap[docPath] = chunkIds;
+    idsMap[docPath] = {
+      md5,
+      chunks: chunkIds,
+      indexedAt: new Date().toISOString()
+    };
 
     await saveIdsMap(this.directory, idsMap);
+  }
+
+  async forgetDocument(docPath) {
+    const idsMap = await getIdsMap(this.directory);
+    const resolvedPath = path.resolve(docPath);
+    let changed = false;
+
+    for (const key of Object.keys(idsMap)) {
+      if (key === resolvedPath || key.startsWith(resolvedPath + "/")) {
+        const chunks = getChunks(idsMap[key]);
+        if (this.store && chunks.length > 0) {
+          try {
+            await this.store.delete({ ids: chunks });
+          } catch {
+          }
+        }
+        delete idsMap[key];
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await saveIdsMap(this.directory, idsMap);
+    }
+
+    return changed;
   }
 
   async search(query, options = {}) {
@@ -98,7 +149,8 @@ export default class LlmStore {
       let searchLimit = limit * 2;
 
       const idsMap = await getIdsMap(this.directory);
-      const ids = idsMap[docPath];
+      const entry = idsMap[docPath];
+      const ids = entry ? getChunks(entry) : undefined;
       if (ids && ids.length < searchLimit) {
         searchLimit = ids.length;
       }
