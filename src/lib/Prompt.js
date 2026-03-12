@@ -135,6 +135,7 @@ class Prompt {
         });
     }
 
+    message.timestamp = Date.now();
     this.messages.push(message);
 
     const answer = await this.execute();
@@ -247,7 +248,7 @@ class Prompt {
       }
 
       if (response.tool_calls && response.tool_calls.length > 0) {
-        this.messages.push({ role: "assistant_with_tool", content: response });
+        this.messages.push({ role: "assistant_with_tool", content: response, timestamp: Date.now() });
 
         // Pre-process saveImage tool calls to extract full base64 from previous tool responses
         for (const toolCall of response.tool_calls) {
@@ -300,7 +301,8 @@ class Prompt {
               role: "tool",
               content: toolResponse,
               tool_call_id: toolCall.id,
-              name: toolCall.name
+              name: toolCall.name,
+              timestamp: Date.now()
             };
           })
         );
@@ -330,7 +332,7 @@ class Prompt {
         answer = JSON.stringify(parsed);
       }
 
-      this.messages.push({ role: "assistant", content: answer });
+      this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
 
       if (this.historyFile) {
         try {
@@ -345,7 +347,8 @@ class Prompt {
                   role: "tool",
                   content: message.content, // Keep original content structure
                   tool_call_id: message.tool_call_id,
-                  name: message.name
+                  name: message.name,
+                  timestamp: message.timestamp
                 };
               }
               return message;
@@ -373,7 +376,8 @@ class Prompt {
                   role: "tool",
                   content: message.content, // Keep original content structure
                   tool_call_id: message.tool_call_id,
-                  name: message.name
+                  name: message.name,
+                  timestamp: message.timestamp
                 };
               }
               return message;

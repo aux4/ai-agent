@@ -21,7 +21,8 @@ export const historyExecutor = async options => {
     console.log(`📜 History from file: ${historyFile}`.bold);
 
     history.forEach((message, index) => {
-      console.log(`\n[${"#" + (index + 1)}]`.gray);
+      const timestamp = message.timestamp ? ` ${new Date(message.timestamp).toLocaleString()}` : "";
+      console.log(`\n[${"#" + (index + 1)}]${timestamp}`.gray);
 
       if (message.role === "user") {
         console.log(`${"👤 USER:".blue.bold}`);
