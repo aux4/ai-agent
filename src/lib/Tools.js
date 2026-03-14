@@ -40,6 +40,25 @@ function isReadOnlyPathAllowed(filePath, currentDirectory) {
   return filePath.startsWith(currentDirectory) || filePath.startsWith(aux4ConfigPath);
 }
 
+// Binary file extensions that should not be read as text
+const BINARY_EXTENSIONS = new Set([
+  ".pdf", ".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
+  ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff",
+  ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flac", ".ogg",
+  ".exe", ".dll", ".so", ".dylib", ".bin", ".dat",
+  ".woff", ".woff2", ".ttf", ".otf", ".eot",
+  ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+  ".class", ".pyc", ".o", ".a", ".lib"
+]);
+
+const BINARY_TOOL_HINTS = {
+  ".pdf": "Use executeAux4('pdf parse \"<file>\"') to extract text and form fields from PDF files.",
+  ".zip": "Use executeAux4('...') or shell commands to inspect zip contents.",
+  ".png": "Use the image parameter on the ask command to pass images to the model.",
+  ".jpg": "Use the image parameter on the ask command to pass images to the model.",
+  ".jpeg": "Use the image parameter on the ask command to pass images to the model."
+};
+
 export const readLocalFileTool = tool(
   async ({ file }) => {
     try {
@@ -48,6 +67,13 @@ export const readLocalFileTool = tool(
       const currentDirectory = process.cwd();
       if (!isReadOnlyPathAllowed(filePath, currentDirectory)) throw new Error("Access denied");
       if (!fs.existsSync(filePath)) throw new Error("File not found");
+
+      const ext = path.extname(filePath).toLowerCase();
+      if (BINARY_EXTENSIONS.has(ext)) {
+        const hint = BINARY_TOOL_HINTS[ext] || "";
+        return `Cannot read binary file (${ext}). ${hint}`.trim();
+      }
+
       return fs.readFileSync(filePath, { encoding: "utf-8" });
     } catch (e) {
       if (e.code === "ENOENT") {
@@ -240,10 +266,14 @@ export const createDirectoryTool = tool(
 );
 
 export const executeAux4CliTool = tool(
-  async ({ command }) => {
+  async ({ command, stdin }) => {
     try {
       const { execSync } = await import("child_process");
-      const result = execSync(`aux4 ${command}`, { encoding: "utf-8" });
+      const options = { encoding: "utf-8" };
+      if (stdin) {
+        options.input = stdin;
+      }
+      const result = execSync(`aux4 ${command}`, options);
       return result;
     } catch (error) {
       return `Error executing command: ${error.message}`;
@@ -253,7 +283,8 @@ export const executeAux4CliTool = tool(
     name: "executeAux4",
     description: executeAux4Desc,
     schema: z.object({
-      command: z.string()
+      command: z.string(),
+      stdin: z.string().optional().describe("Optional data to pass as stdin to the command")
     })
   }
 );

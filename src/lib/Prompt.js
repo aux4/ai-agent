@@ -115,26 +115,44 @@ class Prompt {
     };
 
     if (params && params.image && params.image.trim() !== "") {
-      message.images = params.image
+      const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".tiff", ".ico"]);
+      const imagePaths = params.image
         .split(",")
         .map(imagePath => imagePath.trim())
         .filter(imagePath => imagePath !== "")
-        .map(imagePath => path.resolve(imagePath.trim()))
-        .map(image => {
-          if (!fs.existsSync(image)) {
-            throw new Error(`Image file not found: ${image}`);
+        .filter(imagePath => {
+          const ext = path.extname(imagePath).toLowerCase();
+          if (!ext || !IMAGE_EXTENSIONS.has(ext)) {
+            console.error(`Skipping invalid image path (no recognized image extension): ${imagePath}`);
+            return false;
           }
-
-          const mimeType = mime.lookup(image);
-          if (!mimeType) {
-            throw new Error(`Unsupported image type: ${image}`);
-          }
-
-          const imageBuffer = fs.readFileSync(image);
-          const base64Image = imageBuffer.toString("base64");
-
-          return { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } };
+          return true;
         });
+
+      if (imagePaths.length > 0) {
+        message.images = imagePaths
+          .map(imagePath => path.resolve(imagePath.trim()))
+          .filter(image => {
+            if (!fs.existsSync(image)) {
+              console.error(`Image file not found, skipping: ${image}`);
+              return false;
+            }
+            return true;
+          })
+          .map(image => {
+            const mimeType = mime.lookup(image);
+            if (!mimeType) {
+              console.error(`Unsupported image type, skipping: ${image}`);
+              return null;
+            }
+
+            const imageBuffer = fs.readFileSync(image);
+            const base64Image = imageBuffer.toString("base64");
+
+            return { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } };
+          })
+          .filter(img => img !== null);
+      }
     }
 
     message.timestamp = Date.now();
@@ -299,15 +317,35 @@ class Prompt {
         // Execute all tool calls in parallel
         const toolResults = await Promise.all(
           response.tool_calls.map(async (toolCall) => {
-            const tool = this.tools[toolCall.name];
-            const toolResponse = await tool.invoke(toolCall.args);
-            return {
-              role: "tool",
-              content: toolResponse,
-              tool_call_id: toolCall.id,
-              name: toolCall.name,
-              timestamp: Date.now()
-            };
+            try {
+              const tool = this.tools[toolCall.name];
+              if (!tool) {
+                return {
+                  role: "tool",
+                  content: `Error: Unknown tool "${toolCall.name}". Available tools: ${Object.keys(this.tools).join(", ")}`,
+                  tool_call_id: toolCall.id,
+                  name: toolCall.name,
+                  timestamp: Date.now()
+                };
+              }
+              const toolResponse = await tool.invoke(toolCall.args);
+              return {
+                role: "tool",
+                content: toolResponse,
+                tool_call_id: toolCall.id,
+                name: toolCall.name,
+                timestamp: Date.now()
+              };
+            } catch (error) {
+              console.error(`Tool "${toolCall.name}" failed: ${error.message}`);
+              return {
+                role: "tool",
+                content: `Error executing tool "${toolCall.name}": ${error.message}`,
+                tool_call_id: toolCall.id,
+                name: toolCall.name,
+                timestamp: Date.now()
+              };
+            }
           })
         );
 
@@ -348,6 +386,7 @@ class Prompt {
             this.messages = await compactMessages(this.messages, compactionModel, {
               keepLastMessages: this.compactionConfig.keepLastMessages || 6
             });
+            this.compacted = true;
           } catch (err) {
             console.error(`[compact] Warning: ${err.message}`);
           }
@@ -412,11 +451,13 @@ class Prompt {
       const data = JSON.stringify(simplifiedMessages);
       if (data.length < 3) return;
 
-      // Don't overwrite with less data than what's on disk
-      try {
-        const existing = fs.statSync(this.historyFile);
-        if (existing.size > data.length) return;
-      } catch {}
+      // Don't overwrite with less data than what's on disk (unless compacted)
+      if (!this.compacted) {
+        try {
+          const existing = fs.statSync(this.historyFile);
+          if (existing.size > data.length) return;
+        } catch {}
+      }
 
       if (sync) {
         fs.writeFileSync(this.historyFile, data);

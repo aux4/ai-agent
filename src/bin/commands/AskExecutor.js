@@ -4,6 +4,7 @@ import { readStdIn } from "../../lib/util/Input.js";
 
 export async function askExecutor(params) {
   try {
+    const baseInstructions = params.baseInstructions;
     const instructions = params.instructions;
     const model = params.model;
     const question = params.question;
@@ -43,6 +44,9 @@ export async function askExecutor(params) {
       }
     }
 
+    if (baseInstructions) {
+      await prompt.instructions(await readFile(baseInstructions), params);
+    }
     if (instructions) {
       await prompt.instructions(await readFile(instructions), params);
     }

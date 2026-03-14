@@ -11,6 +11,25 @@ This tool is your **gateway to the aux4 universe** - a powerful command system t
 | Parameter | Type   | Required | Description                                                                                                        |
 | --------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
 | `command` | string | ✅ Yes   | The aux4 command to execute. **Do NOT include** the `aux4` prefix - just provide the nested actions and parameters |
+| `stdin`   | string | ❌ No    | Optional data to pass as stdin to the command. Use this for commands that read input from stdin (e.g., `pdf fill`, `pdf form`) |
+
+## 📥 Passing Data via stdin
+
+Some aux4 commands read structured data from stdin (e.g., `pdf fill` reads JSON field values). Use the `stdin` parameter to pipe data into these commands:
+
+```
+executeAux4({
+  command: 'pdf fill "form.pdf" --out "filled.pdf"',
+  stdin: '{"field1": "value1", "field2": "value2"}'
+})
+```
+
+**When to use `stdin`:**
+- Commands that expect piped input (indicated by `stdin:` prefix in their `.aux4` definition)
+- Passing JSON data to commands like `pdf fill` or `pdf form`
+- Any command that reads from standard input
+
+**Do NOT use shell pipes or redirects** — use the `stdin` parameter instead.
 
 ## ⚠️ Important: Command Format
 

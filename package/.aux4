@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "0.1.30",
+  "version": "0.1.36",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -131,11 +131,16 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio)"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio)"
           ],
           "help": {
             "text": "Ask your question",
             "variables": [
+              {
+                "name": "baseInstructions",
+                "text": "Base instructions file loaded before the main instructions",
+                "default": ""
+              },
               {
                 "name": "instructions",
                 "text": "The instructions file of the prompt",

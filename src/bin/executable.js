@@ -62,19 +62,20 @@ process.title = "aux4-agent";
       });
     } else if (command === "ask") {
       await askExecutor({
-        instructions: args[1],
-        role: args[2],
-        history: args[3],
-        outputSchema: args[4],
-        question: args[5],
-        image: args[6],
-        context: args[7],
-        model: JSON.parse(args[8] || "{}"),
-        storage: args[9],
-        stream: args[10],
-        autoCompact: args[11],
-        compaction: JSON.parse(args[12] || "{}"),
-        bio: JSON.parse(args[13] || "{}")
+        baseInstructions: args[1],
+        instructions: args[2],
+        role: args[3],
+        history: args[4],
+        outputSchema: args[5],
+        question: args[6],
+        image: args[7],
+        context: args[8],
+        model: JSON.parse(args[9] || "{}"),
+        storage: args[10],
+        stream: args[11],
+        autoCompact: args[12],
+        compaction: JSON.parse(args[13] || "{}"),
+        bio: JSON.parse(args[14] || "{}")
       });
     } else if (command === "image") {
       await imageExecutor({

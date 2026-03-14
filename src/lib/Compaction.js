@@ -85,7 +85,8 @@ export async function compactMessages(messages, modelConfig, options = {}) {
   const conversationMessages = messages.filter(m => m.role !== "system");
 
   if (conversationMessages.length <= keepLast + 1) {
-    return messages;
+    const condensed = condenseToolMessages(conversationMessages);
+    return [...systemMessages, ...condensed];
   }
 
   const messagesToSummarize = conversationMessages.slice(0, conversationMessages.length - keepLast);
@@ -100,7 +101,89 @@ export async function compactMessages(messages, modelConfig, options = {}) {
     timestamp: Date.now()
   };
 
-  return [...systemMessages, summaryMessage, ...keptMessages];
+  const condensedKept = condenseToolMessages(keptMessages);
+
+  return [...systemMessages, summaryMessage, ...condensedKept];
+}
+
+function condenseToolMessages(messages) {
+  const result = [];
+  let i = 0;
+
+  while (i < messages.length) {
+    const msg = messages[i];
+
+    if (msg.role === "assistant_with_tool") {
+      // Collect the tool call sequence: assistant_with_tool + tool results
+      const toolCalls = extractToolCalls(msg);
+      const parts = [];
+      i++;
+
+      // Collect subsequent tool result messages
+      while (i < messages.length && messages[i].role === "tool") {
+        const toolMsg = messages[i];
+        const name = toolMsg.name || "unknown";
+        const callInfo = toolCalls.find(tc => tc.id === toolMsg.tool_call_id);
+        const args = callInfo ? callInfo.args : "";
+        const resultText = truncate(extractToolResult(toolMsg.content), 500);
+        parts.push(`**${name}**(${truncate(args, 200)}) → ${resultText}`);
+        i++;
+      }
+
+      // Get any text content from the assistant_with_tool message
+      const assistantText = extractAssistantText(msg);
+      let content = "[Tool calls]\n" + parts.join("\n");
+      if (assistantText) {
+        content = assistantText + "\n\n" + content;
+      }
+
+      result.push({
+        role: "assistant",
+        content,
+        timestamp: msg.timestamp
+      });
+    } else {
+      result.push(msg);
+      i++;
+    }
+  }
+
+  return result;
+}
+
+function extractToolCalls(msg) {
+  const content = msg.content;
+  let toolCalls = [];
+
+  if (content && content.kwargs && content.kwargs.tool_calls) {
+    toolCalls = content.kwargs.tool_calls;
+  } else if (content && content.tool_calls) {
+    toolCalls = content.tool_calls;
+  }
+
+  return toolCalls.map(tc => ({
+    id: tc.id,
+    name: tc.name,
+    args: typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args || {})
+  }));
+}
+
+function extractAssistantText(msg) {
+  const content = msg.content;
+  let text = "";
+
+  if (content && content.kwargs && content.kwargs.content) {
+    const inner = content.kwargs.content;
+    if (typeof inner === "string") {
+      text = inner;
+    } else if (Array.isArray(inner)) {
+      text = inner.filter(c => c.type === "text").map(c => c.text).join("");
+    }
+  } else if (typeof content === "string") {
+    text = content;
+  }
+
+  return text.trim();
 }
 
 function formatMessagesForSummary(messages) {
