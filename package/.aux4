@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "0.1.24",
+  "version": "0.1.29",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(instructions, role, history, outputSchema, question, image, context, model, storage, stream)"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio)"
           ],
           "help": {
             "text": "Ask your question",
@@ -175,6 +175,21 @@
                 "name": "stream",
                 "text": "Enable streaming output",
                 "default": "false"
+              },
+              {
+                "name": "autoCompact",
+                "text": "Enable auto-compaction of conversation history",
+                "default": "false"
+              },
+              {
+                "name": "compaction",
+                "text": "Compaction configuration as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "bio",
+                "text": "Agent bio as JSON (name, role, description, picture)",
+                "default": ""
               },
               {
                 "name": "question",
@@ -242,8 +257,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -289,6 +304,21 @@
                 "default": "{}"
               },
               {
+                "name": "autoCompact",
+                "text": "Enable auto-compaction of conversation history",
+                "default": "false"
+              },
+              {
+                "name": "compaction",
+                "text": "Compaction configuration as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "bio",
+                "text": "Agent bio as JSON (name, role, description, picture)",
+                "default": ""
+              },
+              {
                 "name": "text",
                 "text": "The text",
                 "arg": true
@@ -309,6 +339,77 @@
                 "text": "The history JSON file to display",
                 "default": "history.json",
                 "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "summarize",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs summarize values(historyFile, model)"
+          ],
+          "help": {
+            "text": "Summarize conversation history as markdown",
+            "variables": [
+              {
+                "name": "historyFile",
+                "text": "The history JSON file to summarize",
+                "default": "history.json",
+                "arg": true
+              },
+              {
+                "name": "model",
+                "text": "Model configuration as JSON",
+                "default": "{}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "remember",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs remember values(historyFile, model)"
+          ],
+          "help": {
+            "text": "Generate a concise memory entry from conversation history",
+            "variables": [
+              {
+                "name": "historyFile",
+                "text": "The history JSON file",
+                "default": "history.json",
+                "arg": true
+              },
+              {
+                "name": "model",
+                "text": "Model configuration as JSON",
+                "default": "{}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "compact",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs compact values(historyFile, model, keepLastMessages)"
+          ],
+          "help": {
+            "text": "Compact conversation history by summarizing older messages",
+            "variables": [
+              {
+                "name": "historyFile",
+                "text": "The history JSON file to compact",
+                "default": "history.json",
+                "arg": true
+              },
+              {
+                "name": "model",
+                "text": "Model configuration as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "keepLastMessages",
+                "text": "Number of recent messages to keep verbatim",
+                "default": "6"
               }
             ]
           }

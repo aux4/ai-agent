@@ -9,6 +9,7 @@ import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import { shouldCompact, compactMessages } from "./Compaction.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -23,9 +24,10 @@ export class PromptError extends Error {
 }
 
 class Prompt {
-  constructor(config = {}, toolsConfig = {}) {
+  constructor(config = {}, toolsConfig = {}, options = {}) {
     this.config = config;
     this.toolsConfig = toolsConfig;
+    this.compactionConfig = options.compaction || null;
     this.messages = [];
     this.mcpClient = null;
 
@@ -137,6 +139,7 @@ class Prompt {
 
     message.timestamp = Date.now();
     this.messages.push(message);
+    this.saveHistory();
 
     const answer = await this.execute();
 
@@ -249,6 +252,7 @@ class Prompt {
 
       if (response.tool_calls && response.tool_calls.length > 0) {
         this.messages.push({ role: "assistant_with_tool", content: response, timestamp: Date.now() });
+        this.saveHistory();
 
         // Pre-process saveImage tool calls to extract full base64 from previous tool responses
         for (const toolCall of response.tool_calls) {
@@ -308,6 +312,7 @@ class Prompt {
         );
 
         this.messages.push(...toolResults);
+        this.saveHistory();
 
         return await this.execute();
       }
@@ -334,60 +339,26 @@ class Prompt {
 
       this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
 
-      if (this.historyFile) {
-        try {
-          // Simplify messages only for history saving, but preserve image data
-          const simplifiedMessages = this.messages
-            .filter(message => message.role !== "system")
-            .map(message => {
-              if (message.role === "tool") {
-                // For tool responses, preserve the original structure if it contains image data
-                // This ensures MCP tool responses with embedded images are kept intact
-                return {
-                  role: "tool",
-                  content: message.content, // Keep original content structure
-                  tool_call_id: message.tool_call_id,
-                  name: message.name,
-                  timestamp: message.timestamp
-                };
-              }
-              return message;
+      if (this.compactionConfig && this.compactionConfig.contextWindow) {
+        const promptTokens = response.response_metadata?.tokenUsage?.promptTokens
+          || response.usage_metadata?.input_tokens || 0;
+        if (shouldCompact(promptTokens, this.compactionConfig)) {
+          const compactionModel = this.compactionConfig.model || this.config;
+          try {
+            this.messages = await compactMessages(this.messages, compactionModel, {
+              keepLastMessages: this.compactionConfig.keepLastMessages || 6
             });
-          const historyData = JSON.stringify(simplifiedMessages);
-          fs.writeFileSync(this.historyFile, historyData);
-        } catch (error) {
-          console.error("Error writing history file:", error.message);
+          } catch (err) {
+            console.error(`[compact] Warning: ${err.message}`);
+          }
         }
       }
 
+      this.saveHistory(true);
+
       return answer;
     } catch (e) {
-      // Save history even if there was an error, as long as we have messages
-      if (this.historyFile && this.messages.length > 0) {
-        try {
-          // Simplify messages only for history saving, but preserve image data
-          const simplifiedMessages = this.messages
-            .filter(message => message.role !== "system")
-            .map(message => {
-              if (message.role === "tool") {
-                // For tool responses, preserve the original structure if it contains image data
-                // This ensures MCP tool responses with embedded images are kept intact
-                return {
-                  role: "tool",
-                  content: message.content, // Keep original content structure
-                  tool_call_id: message.tool_call_id,
-                  name: message.name,
-                  timestamp: message.timestamp
-                };
-              }
-              return message;
-            });
-          const historyData = JSON.stringify(simplifiedMessages);
-          fs.writeFileSync(this.historyFile, historyData);
-        } catch (historyError) {
-          console.error("Error writing history file after error:", historyError.message);
-        }
-      }
+      this.saveHistory(true);
       throw new PromptError(e.message, e);
     }
   }
@@ -416,6 +387,47 @@ class Prompt {
 
   onMessage(callback) {
     this.callback = callback;
+  }
+
+  saveHistory(sync = false) {
+    if (!this.historyFile) return;
+    try {
+      const simplifiedMessages = this.messages
+        .filter(message => message.role !== "system")
+        .map(message => {
+          if (message.role === "tool") {
+            return {
+              role: "tool",
+              content: message.content,
+              tool_call_id: message.tool_call_id,
+              name: message.name,
+              timestamp: message.timestamp
+            };
+          }
+          return message;
+        });
+
+      if (simplifiedMessages.length === 0) return;
+
+      const data = JSON.stringify(simplifiedMessages);
+      if (data.length < 3) return;
+
+      // Don't overwrite with less data than what's on disk
+      try {
+        const existing = fs.statSync(this.historyFile);
+        if (existing.size > data.length) return;
+      } catch {}
+
+      if (sync) {
+        fs.writeFileSync(this.historyFile, data);
+      } else {
+        fs.writeFile(this.historyFile, data, (err) => {
+          if (err) console.error("Error writing history file:", err.message);
+        });
+      }
+    } catch (error) {
+      console.error("Error writing history file:", error.message);
+    }
   }
 
   async close() {

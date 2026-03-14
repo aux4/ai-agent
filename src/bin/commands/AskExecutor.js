@@ -13,6 +13,9 @@ export async function askExecutor(params) {
     const context = params.context;
     const storage = params.storage;
     const stream = params.stream;
+    const autoCompact = params.autoCompact === true || params.autoCompact === "true";
+    const compaction = autoCompact ? params.compaction : null;
+    const bio = params.bio;
 
     let contextContent;
     if (context === true || context === "true") {
@@ -27,8 +30,19 @@ export async function askExecutor(params) {
     // Create tools configuration if storage is provided
     const toolsConfig = storage ? { storage } : {};
 
-    const prompt = new Prompt(model, toolsConfig);
+    const prompt = new Prompt(model, toolsConfig, { compaction });
     await prompt.init();
+
+    if (bio && typeof bio === "object" && Object.keys(bio).length > 0) {
+      const bioParts = [];
+      if (bio.name) bioParts.push(`**Name:** ${bio.name}`);
+      if (bio.role) bioParts.push(`**Role:** ${bio.role}`);
+      if (bio.description) bioParts.push(`**Description:** ${bio.description}`);
+      if (bioParts.length > 0) {
+        await prompt.instructions(`# Agent Identity\n\n${bioParts.join("\n")}`);
+      }
+    }
+
     if (instructions) {
       await prompt.instructions(await readFile(instructions), params);
     }

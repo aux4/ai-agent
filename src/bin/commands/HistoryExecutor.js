@@ -26,6 +26,8 @@ export const historyExecutor = async options => {
 
       if (message.role === "user") {
         console.log(`${"👤 USER:".blue.bold}`);
+      } else if (message.role === "assistant" && message.compacted) {
+        console.log(`${"📦 COMPACTED SUMMARY:".yellow.bold}`);
       } else if (message.role === "assistant") {
         console.log(`${"🤖 ASSISTANT:".blue.bold}`);
       } else if (message.role === "assistant_with_tool") {

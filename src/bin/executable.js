@@ -19,6 +19,9 @@ import { forgetExecutor } from "./commands/ForgetExecutor.js";
 import { askExecutor } from "./commands/AskExecutor.js";
 import { imageExecutor } from "./commands/ImageExecutor.js";
 import { historyExecutor } from "./commands/HistoryExecutor.js";
+import { compactExecutor } from "./commands/CompactExecutor.js";
+import { summarizeExecutor } from "./commands/SummarizeExecutor.js";
+import { rememberExecutor } from "./commands/RememberExecutor.js";
 
 process.title = "aux4-agent";
 
@@ -31,7 +34,7 @@ process.title = "aux4-agent";
 
     if (!command) {
       console.log("Usage: aux4-agent <command> [options]");
-      console.log("Commands: learn, search, forget, ask, image, history");
+      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact");
       process.exit(1);
     }
 
@@ -68,7 +71,10 @@ process.title = "aux4-agent";
         context: args[7],
         model: JSON.parse(args[8] || "{}"),
         storage: args[9],
-        stream: args[10]
+        stream: args[10],
+        autoCompact: args[11],
+        compaction: JSON.parse(args[12] || "{}"),
+        bio: JSON.parse(args[13] || "{}")
       });
     } else if (command === "image") {
       await imageExecutor({
@@ -84,9 +90,25 @@ process.title = "aux4-agent";
       await historyExecutor({
         historyFile: args[1]
       });
+    } else if (command === "summarize") {
+      await summarizeExecutor({
+        historyFile: args[1],
+        model: JSON.parse(args[2] || "{}")
+      });
+    } else if (command === "remember") {
+      await rememberExecutor({
+        historyFile: args[1],
+        model: JSON.parse(args[2] || "{}")
+      });
+    } else if (command === "compact") {
+      await compactExecutor({
+        historyFile: args[1],
+        model: JSON.parse(args[2] || "{}"),
+        keepLastMessages: parseInt(args[3] || "6")
+      });
     } else {
       console.error(`Unknown command: ${command}`.red);
-      console.log("Available commands: learn, search, forget, ask, image, history");
+      console.log("Available commands: learn, search, forget, ask, image, history, summarize, compact");
       process.exit(1);
     }
   } catch (e) {

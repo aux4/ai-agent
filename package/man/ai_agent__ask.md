@@ -16,7 +16,7 @@ Key features:
 #### Usage
 
 ```bash
-aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] <question>
+aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] <question>
 ```
 
 --instructions   Prompt instructions file (default: instructions.md)
@@ -27,7 +27,17 @@ aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--
 --image          Image path(s), comma-separated for multiple (default: "")
 --storage        Storage directory for the vector store (default: .context)
 --stream         Enable streaming token output (default: false)
+--autoCompact    Enable auto-compaction of conversation history (default: false)
+--compaction     Compaction configuration as JSON (default: {})
 question         The question to ask (positional argument)
+
+Auto-compaction requires both `--autoCompact true` and a `compaction` config with `contextWindow` set. When prompt tokens exceed the threshold (`contextWindow * maxContextPercent / 100`), older messages are automatically summarized.
+
+Compaction config fields:
+- `contextWindow` — model's context window size in tokens (required)
+- `maxContextPercent` — trigger threshold as percentage (default: 85)
+- `keepLastMessages` — recent messages to keep verbatim (default: 6)
+- `model` — optional model config for summarization (defaults to main model)
 
 #### Example
 
