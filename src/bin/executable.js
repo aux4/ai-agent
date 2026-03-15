@@ -75,7 +75,8 @@ process.title = "aux4-agent";
         stream: args[11],
         autoCompact: args[12],
         compaction: JSON.parse(args[13] || "{}"),
-        bio: JSON.parse(args[14] || "{}")
+        bio: JSON.parse(args[14] || "{}"),
+        permissions: JSON.parse(args[15] || "{}")
       });
     } else if (command === "image") {
       await imageExecutor({

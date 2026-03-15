@@ -289,6 +289,511 @@ export const executeAux4CliTool = tool(
   }
 );
 
+// Convert a glob pattern (with * wildcards) to a RegExp
+export function matchesPattern(command, pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp("^" + escaped.replace(/\*/g, ".*") + "$");
+  return regex.test(command);
+}
+
+// Parse a permission pattern into its type and matching pattern
+// Returns { type: "command"|"file", scope?: string, pattern: string }
+export function parsePattern(pattern) {
+  const fileMatch = pattern.match(/^file:(read|write|delete):(.+)$/);
+  if (fileMatch) {
+    return { type: "file", scope: fileMatch[1], pattern: fileMatch[2] };
+  }
+  // Strip optional aux4: prefix for command patterns
+  const cmdPattern = pattern.startsWith("aux4:") ? pattern.slice(5) : pattern;
+  return { type: "command", pattern: cmdPattern };
+}
+
+// Parse a subject string into its type and value
+// Returns { type: "command"|"file", scope?: string, value: string }
+function parseSubject(subject) {
+  const fileMatch = subject.match(/^file:(read|write|delete):(.+)$/);
+  if (fileMatch) {
+    return { type: "file", scope: fileMatch[1], value: fileMatch[2] };
+  }
+  return { type: "command", value: subject };
+}
+
+// Check permission for a subject against the permissions config
+// Subject can be a command string or "file:<scope>:<path>"
+// Returns "allow", "ask", or "deny"
+export function checkPermission(subject, permissions = {}) {
+  const deny = permissions.deny || [];
+  const ask = permissions.ask || [];
+  const allow = permissions.allow || ["*"];
+
+  const subjectParsed = parseSubject(subject);
+
+  function matchesList(list) {
+    for (const rawPattern of list) {
+      const parsed = parsePattern(rawPattern);
+      if (subjectParsed.type === "file") {
+        // File subjects only match file patterns with the same scope
+        if (parsed.type === "file" && parsed.scope === subjectParsed.scope) {
+          if (matchesPattern(subjectParsed.value, parsed.pattern)) return true;
+        }
+      } else {
+        // Command subjects only match command patterns
+        if (parsed.type === "command") {
+          if (matchesPattern(subjectParsed.value, parsed.pattern)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  if (matchesList(deny)) return "deny";
+  if (matchesList(ask)) return "ask";
+  if (matchesList(allow)) return "allow";
+  return "deny";
+}
+
+// Factory that wraps executeAux4 with permission checking
+export const createExecuteAux4Tool = (permissions) => tool(
+  async ({ command, stdin }) => {
+    const decision = checkPermission(command, permissions);
+
+    if (decision === "deny") {
+      return `Permission denied: command "${command}" is not allowed by the permissions configuration.`;
+    }
+
+    if (decision === "ask") {
+      if (!process.stdin.isTTY) {
+        return `Permission denied: command "${command}" requires user confirmation but session is non-interactive.`;
+      }
+
+      const confirmed = await new Promise((resolve) => {
+        askUserQueue = askUserQueue.then(async () => {
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stderr
+          });
+          process.stderr.write(`\n🔒 The agent wants to execute: aux4 ${command}\nAllow? (Y/n) > `);
+          const answer = await new Promise((res) => {
+            rl.on("line", (line) => {
+              rl.close();
+              res(line);
+            });
+            rl.on("close", () => res(""));
+          });
+          const accepted = answer.trim() === "" || answer.trim().toLowerCase() === "y";
+          resolve(accepted);
+        });
+      });
+
+      if (!confirmed) {
+        return `Command "${command}" was denied by the user.`;
+      }
+    }
+
+    try {
+      const { execSync } = await import("child_process");
+      const options = { encoding: "utf-8" };
+      if (stdin) {
+        options.input = stdin;
+      }
+      const result = execSync(`aux4 ${command}`, options);
+      return result;
+    } catch (error) {
+      return `Error executing command: ${error.message}`;
+    }
+  },
+  {
+    name: "executeAux4",
+    description: executeAux4Desc,
+    schema: z.object({
+      command: z.string(),
+      stdin: z.string().optional().describe("Optional data to pass as stdin to the command")
+    })
+  }
+);
+
+// Helper to prompt user for file permission (reuses askUserQueue serialization)
+async function askFilePermission(scope, filePath) {
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+  return new Promise((resolve) => {
+    askUserQueue = askUserQueue.then(async () => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stderr
+      });
+      process.stderr.write(`\n🔒 The agent wants to ${scope} file: ${filePath}\nAllow? (Y/n) > `);
+      const answer = await new Promise((res) => {
+        rl.on("line", (line) => {
+          rl.close();
+          res(line);
+        });
+        rl.on("close", () => res(""));
+      });
+      resolve(answer.trim() === "" || answer.trim().toLowerCase() === "y");
+    });
+  });
+}
+
+// Helper to check file permission and return denial message or null
+async function checkFileAccess(scope, filePath, permissions) {
+  const subject = `file:${scope}:${filePath}`;
+  const decision = checkPermission(subject, permissions);
+
+  if (decision === "deny") {
+    return `Permission denied: ${scope} "${filePath}" is not allowed by the permissions configuration.`;
+  }
+  if (decision === "ask") {
+    const confirmed = await askFilePermission(scope, filePath);
+    if (!confirmed) {
+      return `File ${scope} "${filePath}" was denied by the user.`;
+    }
+  }
+  return null;
+}
+
+// Factory: readFile with permission checking
+export const createReadFileTool = (permissions) => tool(
+  async ({ file }) => {
+    try {
+      const expandedPath = expandTildePath(file);
+      const filePath = path.resolve(expandedPath);
+      const currentDirectory = process.cwd();
+      if (!isReadOnlyPathAllowed(filePath, currentDirectory)) throw new Error("Access denied");
+
+      const denied = await checkFileAccess("read", filePath, permissions);
+      if (denied) return denied;
+
+      if (!fs.existsSync(filePath)) throw new Error("File not found");
+
+      const ext = path.extname(filePath).toLowerCase();
+      if (BINARY_EXTENSIONS.has(ext)) {
+        const hint = BINARY_TOOL_HINTS[ext] || "";
+        return `Cannot read binary file (${ext}). ${hint}`.trim();
+      }
+
+      return fs.readFileSync(filePath, { encoding: "utf-8" });
+    } catch (e) {
+      if (e.code === "ENOENT") return "File not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "readFile",
+    description: readFileDesc,
+    schema: z.object({ file: z.string() })
+  }
+);
+
+// Factory: writeFile with permission checking
+export const createWriteFileTool = (permissions) => tool(
+  async ({ file, content }) => {
+    try {
+      const filePath = path.resolve(file);
+      const currentDirectory = process.cwd();
+      if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
+
+      const denied = await checkFileAccess("write", filePath, permissions);
+      if (denied) return denied;
+
+      const fileExists = fs.existsSync(filePath);
+      fs.writeFileSync(filePath, content, { encoding: "utf-8" });
+      if (!fileExists) createdPaths.push(filePath);
+
+      return "file created";
+    } catch (e) {
+      if (e.code === "ENOENT") return "File not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "writeFile",
+    description: writeFileDesc,
+    schema: z.object({ file: z.string(), content: z.string() })
+  }
+);
+
+// Factory: editFile with permission checking
+export const createEditFileTool = (permissions) => tool(
+  async ({ file, old_string, new_string, replace_all = false }) => {
+    try {
+      const filePath = path.resolve(file);
+      const currentDirectory = process.cwd();
+      if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
+
+      const denied = await checkFileAccess("write", filePath, permissions);
+      if (denied) return denied;
+
+      if (!fs.existsSync(filePath)) return "File not found";
+
+      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
+      if (!content.includes(old_string)) return "old_string not found in file";
+
+      let newContent;
+      let replacementCount = 0;
+
+      if (replace_all) {
+        const regex = new RegExp(old_string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+        replacementCount = (content.match(regex) || []).length;
+        newContent = content.split(old_string).join(new_string);
+      } else {
+        replacementCount = 1;
+        newContent = content.replace(old_string, new_string);
+      }
+
+      fs.writeFileSync(filePath, newContent, { encoding: "utf-8" });
+
+      if (replacementCount > 1) return `file edited (${replacementCount} replacements)`;
+      return "file edited";
+    } catch (e) {
+      if (e.code === "ENOENT") return "File not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "editFile",
+    description: editFileDesc,
+    schema: z.object({
+      file: z.string(),
+      old_string: z.string(),
+      new_string: z.string(),
+      replace_all: z.boolean().optional()
+    })
+  }
+);
+
+// Factory: saveImage with permission checking
+export const createSaveImageTool = (permissions) => tool(
+  async ({ imageName, content }) => {
+    try {
+      const filePath = path.resolve(imageName);
+      const currentDirectory = process.cwd();
+      if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
+
+      const denied = await checkFileAccess("write", filePath, permissions);
+      if (denied) return denied;
+
+      if (!content.startsWith("data:image/") && !content.match(/^[A-Za-z0-9+/]+=*$/)) {
+        throw new Error(
+          `Invalid image content format. Expected base64 data or data URL (data:image/...), but received: ${content.substring(0, 100)}...`
+        );
+      }
+
+      const base64Data = content.replace(/^data:image\/[^;]+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+
+      const fileExists = fs.existsSync(filePath);
+      fs.writeFileSync(filePath, buffer);
+      if (!fileExists) createdPaths.push(filePath);
+
+      return `Image saved to ${imageName}`;
+    } catch (e) {
+      if (e.code === "ENOENT") return "Directory not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "saveImage",
+    description: saveImageDesc,
+    schema: z.object({ imageName: z.string(), content: z.string() })
+  }
+);
+
+// Factory: removeFiles with permission checking
+export const createRemoveFilesTool = (permissions) => tool(
+  async ({ files }) => {
+    try {
+      const currentDirectory = process.cwd();
+      const results = [];
+      const filesToRemove = Array.isArray(files) ? files : [files];
+
+      for (const file of filesToRemove) {
+        const filePath = path.resolve(file);
+
+        if (!filePath.startsWith(currentDirectory)) {
+          results.push(`${file}: Access denied - path outside current directory`);
+          continue;
+        }
+
+        const denied = await checkFileAccess("delete", filePath, permissions);
+        if (denied) {
+          results.push(`${file}: ${denied}`);
+          continue;
+        }
+
+        if (!createdPaths.includes(filePath)) {
+          results.push(`${file}: You can just delete files previously created by the agent`);
+          continue;
+        }
+
+        if (!fs.existsSync(filePath)) {
+          results.push(`${file}: File or directory not found`);
+          const index = createdPaths.indexOf(filePath);
+          if (index > -1) createdPaths.splice(index, 1);
+          continue;
+        }
+
+        try {
+          const stats = fs.statSync(filePath);
+          if (stats.isDirectory()) {
+            fs.rmSync(filePath, { recursive: true, force: true });
+            results.push(`${file}: Directory removed successfully`);
+          } else {
+            fs.unlinkSync(filePath);
+            results.push(`${file}: File removed successfully`);
+          }
+          const index = createdPaths.indexOf(filePath);
+          if (index > -1) createdPaths.splice(index, 1);
+        } catch (removeError) {
+          results.push(`${file}: Error removing - ${removeError.message}`);
+        }
+      }
+
+      return results.join("\n");
+    } catch (e) {
+      return `Error: ${e.message}`;
+    }
+  },
+  {
+    name: "removeFiles",
+    description: removeFilesDesc,
+    schema: z.object({
+      files: z.union([z.string(), z.array(z.string())]).describe("File or directory path(s) to remove. Can be a single string or array of strings.")
+    })
+  }
+);
+
+// Factory: listFiles with permission checking
+export const createListFilesTool = (permissions) => tool(
+  async ({ path: targetPath, recursive = true, exclude = "" }) => {
+    try {
+      const currentDirectory = process.cwd();
+      const expandedPath = expandTildePath(targetPath || currentDirectory);
+      const directory = path.resolve(expandedPath);
+      const recurse = recursive !== false && recursive !== "false";
+      const excludePrefixes = (exclude && exclude.split(",")) || [];
+      if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
+
+      const denied = await checkFileAccess("read", directory, permissions);
+      if (denied) return denied;
+
+      const entries = fs.readdirSync(directory, { withFileTypes: true });
+      const result = [];
+
+      for (const entry of entries) {
+        const fullPath = path.join(directory, entry.name);
+        const relPath = path.relative(currentDirectory, fullPath);
+        if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
+        if (entry.isFile()) {
+          result.push(relPath);
+        } else if (entry.isDirectory() && recurse) {
+          const subFiles = fs
+            .readdirSync(fullPath, { withFileTypes: true })
+            .filter(e => e.isFile())
+            .map(e => path.join(relPath, e.name))
+            .filter(p => !excludePrefixes.some(prefix => p.startsWith(prefix)));
+          result.push(...subFiles);
+        }
+      }
+
+      return result.join("\n");
+    } catch (e) {
+      if (e.code === "ENOENT") return "Directory not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "listFiles",
+    description: listFilesDesc,
+    schema: z.object({
+      path: z.string().optional(),
+      recursive: z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional(),
+      exclude: z.string().optional()
+    })
+  }
+);
+
+// Factory: searchFiles with permission checking
+export const createSearchFilesTool = (permissions) => tool(
+  async ({ pattern, path: targetPath, include = "", exclude = "", maxResults = 50 }) => {
+    try {
+      const currentDirectory = process.cwd();
+      const expandedPath = expandTildePath(targetPath || currentDirectory);
+      const directory = path.resolve(expandedPath);
+
+      if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
+
+      const denied = await checkFileAccess("read", directory, permissions);
+      if (denied) return denied;
+
+      if (!fs.existsSync(directory)) return "Directory not found";
+
+      const includeExtensions = include ? include.split(",").map(ext => ext.trim().toLowerCase()) : [];
+      const excludePrefixes = exclude ? exclude.split(",").map(p => p.trim()) : [];
+      const lowerPattern = pattern.toLowerCase();
+      const results = [];
+
+      function searchDir(dir) {
+        if (results.length >= maxResults) return;
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+
+        for (const entry of entries) {
+          if (results.length >= maxResults) return;
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(currentDirectory, fullPath);
+          if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
+
+          if (entry.isDirectory()) {
+            searchDir(fullPath);
+          } else if (entry.isFile()) {
+            if (includeExtensions.length > 0) {
+              const ext = path.extname(entry.name).slice(1).toLowerCase();
+              if (!includeExtensions.includes(ext)) continue;
+            }
+            try {
+              const content = fs.readFileSync(fullPath, { encoding: "utf-8" });
+              const lines = content.split("\n");
+              for (let i = 0; i < lines.length; i++) {
+                if (results.length >= maxResults) return;
+                if (lines[i].toLowerCase().includes(lowerPattern)) {
+                  results.push(`${relPath}:${i + 1}: ${lines[i]}`);
+                }
+              }
+            } catch { /* Skip binary or unreadable files */ }
+          }
+        }
+      }
+
+      searchDir(directory);
+
+      if (results.length === 0) return "No matches found";
+      return results.join("\n");
+    } catch (e) {
+      if (e.code === "ENOENT") return "Directory not found";
+      if (e.code === "EACCES") return "Access denied";
+      return e.message;
+    }
+  },
+  {
+    name: "searchFiles",
+    description: searchFilesDesc,
+    schema: z.object({
+      pattern: z.string(),
+      path: z.string().optional(),
+      include: z.string().optional(),
+      exclude: z.string().optional(),
+      maxResults: z.number().optional()
+    })
+  }
+);
+
 export const saveImageTool = tool(
   async ({ imageName, content }) => {
     try {
@@ -601,18 +1106,18 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
 export const searchContextTool = createSearchContextTool();
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig } = config;
+  const { storage, embeddingsConfig, permissions } = config;
 
   return {
-    readFile: readLocalFileTool,
-    writeFile: writeLocalFileTool,
-    editFile: editLocalFileTool,
-    saveImage: saveImageTool,
-    listFiles: listFilesTool,
-    searchFiles: searchFilesTool,
+    readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
+    writeFile: permissions ? createWriteFileTool(permissions) : writeLocalFileTool,
+    editFile: permissions ? createEditFileTool(permissions) : editLocalFileTool,
+    saveImage: permissions ? createSaveImageTool(permissions) : saveImageTool,
+    listFiles: permissions ? createListFilesTool(permissions) : listFilesTool,
+    searchFiles: permissions ? createSearchFilesTool(permissions) : searchFilesTool,
     createDirectory: createDirectoryTool,
-    removeFiles: removeFilesTool,
-    executeAux4: executeAux4CliTool,
+    removeFiles: permissions ? createRemoveFilesTool(permissions) : removeFilesTool,
+    executeAux4: permissions ? createExecuteAux4Tool(permissions) : executeAux4CliTool,
     searchContext: createSearchContextTool(storage, embeddingsConfig),
     askUser: createAskUserTool()
   };

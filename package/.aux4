@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio)"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions)"
           ],
           "help": {
             "text": "Ask your question",
@@ -195,6 +195,11 @@
                 "name": "bio",
                 "text": "Agent bio as JSON (name, role, description, picture)",
                 "default": ""
+              },
+              {
+                "name": "permissions",
+                "text": "Permissions configuration as JSON (allow, ask, deny arrays)",
+                "default": "{}"
               },
               {
                 "name": "question",
@@ -262,8 +267,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -322,6 +327,11 @@
                 "name": "bio",
                 "text": "Agent bio as JSON (name, role, description, picture)",
                 "default": ""
+              },
+              {
+                "name": "permissions",
+                "text": "Permissions configuration as JSON (allow, ask, deny arrays)",
+                "default": "{}"
               },
               {
                 "name": "text",

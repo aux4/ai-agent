@@ -17,6 +17,7 @@ export async function askExecutor(params) {
     const autoCompact = params.autoCompact === true || params.autoCompact === "true";
     const compaction = autoCompact ? params.compaction : null;
     const bio = params.bio;
+    const permissions = params.permissions;
 
     let contextContent;
     if (context === true || context === "true") {
@@ -28,8 +29,11 @@ export async function askExecutor(params) {
       message = `---\n${contextContent}\n---\n${question}`;
     }
 
-    // Create tools configuration if storage is provided
+    // Create tools configuration
     const toolsConfig = storage ? { storage } : {};
+    if (permissions && typeof permissions === "object" && Object.keys(permissions).length > 0) {
+      toolsConfig.permissions = permissions;
+    }
 
     const prompt = new Prompt(model, toolsConfig, { compaction });
     await prompt.init();

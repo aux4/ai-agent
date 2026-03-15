@@ -60,6 +60,7 @@ Key variables (from the package help):
 - image (default: "") — path(s) to image(s) to attach (comma-separated if multiple).
 - storage (default: .llm) — the storage directory for the vector store.
 - stream (default: "false") — enable streaming output (tokens are printed as they arrive).
+- permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples (from tests):
@@ -349,6 +350,91 @@ The `askUser` tool lets the agent prompt the user interactively when it needs cl
 ### searchFiles
 
 The `searchFiles` tool performs a case-insensitive text search across project files. It supports filtering by file extension, excluding directories, and limiting results. The agent uses this to find relevant code or content without reading every file.
+
+---
+
+## Permissions
+
+The agent supports a permissions system that controls which aux4 commands the agent can execute and which file operations it can perform. Permissions are configured via `config.yaml` or passed inline as JSON with the `--permissions` flag.
+
+### Configuration
+
+```yaml
+config:
+  permissions:
+    allow:
+      - "*"              # allow all aux4 commands
+      - "file:read:*"    # allow reading all files
+      - "file:write:*"   # allow writing all files
+      - "file:delete:*"  # allow deleting all files
+    ask:
+      - "file:write:*.env"  # prompt user before modifying .env files
+    deny:
+      - "deploy*"           # block deploy commands
+      - "file:delete:*"     # block all file deletions
+```
+
+Default values: `allow: ["*", "file:read:*", "file:write:*", "file:delete:*"]`, `ask: []`, `deny: []` — everything is allowed by default for backward compatibility.
+
+### Pattern Types
+
+| Pattern | Matches |
+|---------|---------|
+| `hello` | aux4 command `hello` |
+| `aux4:hello` | aux4 command `hello` (explicit prefix, same as above) |
+| `config*` | any aux4 command starting with `config` |
+| `file:read:*.env` | reading any `.env` file |
+| `file:write:src/*` | writing or editing files in `src/` |
+| `file:delete:*` | deleting any file |
+
+Patterns without a `file:` prefix are command patterns. The `aux4:` prefix on command patterns is optional and stripped before matching. File patterns only match file operations and command patterns only match command executions — they never cross-match.
+
+### Evaluation Order
+
+1. **deny** — if any deny pattern matches, the operation is blocked
+2. **ask** — if any ask pattern matches, the user is prompted for confirmation (Y/n)
+3. **allow** — if any allow pattern matches, the operation is permitted
+4. **no match** — if nothing matches, the operation is blocked
+
+### Protected Operations
+
+The permissions system covers these tool operations:
+
+| Tool | Permission Scope |
+|------|-----------------|
+| `readFile` | `file:read:<path>` |
+| `writeFile` | `file:write:<path>` |
+| `editFile` | `file:write:<path>` |
+| `saveImage` | `file:write:<path>` |
+| `listFiles` | `file:read:<path>` |
+| `searchFiles` | `file:read:<path>` |
+| `removeFiles` | `file:delete:<path>` |
+| `executeAux4` | command name (e.g., `hello`, `config get`) |
+
+### Examples
+
+Block the agent from writing any files:
+
+```bash
+aux4 ai agent ask "Write hello to output.txt" --config --permissions '{"allow":["*","file:read:*"],"deny":["file:write:*"]}'
+```
+
+Allow all commands but prompt before running deploy:
+
+```yaml
+config:
+  permissions:
+    allow:
+      - "*"
+      - "file:read:*"
+      - "file:write:*"
+      - "file:delete:*"
+    ask:
+      - "deploy*"
+    deny: []
+```
+
+**Note:** File permission checks run after the existing path security checks (current directory bounds), adding a second layer of protection.
 
 ---
 

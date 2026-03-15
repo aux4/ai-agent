@@ -3,3 +3,11 @@ config:
     type: openai
     config:
       model: gpt-5-mini
+  permissions:
+    allow:
+      - "*"
+      - "file:read:*"
+      - "file:write:*"
+      - "file:delete:*"
+    ask: []
+    deny: []

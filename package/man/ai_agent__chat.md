@@ -2,12 +2,12 @@
 
 Start an interactive chat loop with the AI agent. Each user input is logged and sent through the ask pipeline. The conversation continues until the user types `exit`. History is saved automatically between turns so the agent maintains context throughout the session.
 
-The chat command supports all the same features as the ask command (instructions, images, context, model configuration) but is designed for multi-turn interactive sessions.
+The chat command supports all the same features as the ask command (instructions, images, context, model configuration, permissions) but is designed for multi-turn interactive sessions.
 
 #### Usage
 
 ```bash
-aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] <text>
+aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] <text>
 ```
 
 --instructions   Prompt instructions file (default: instructions.md)
@@ -20,6 +20,7 @@ aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [-
 --model          Model configuration JSON (default: {})
 --autoCompact    Enable auto-compaction of conversation history (default: false)
 --compaction     Compaction configuration as JSON (default: {})
+--permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
 text             Initial text to send (positional argument)
 
 #### Example

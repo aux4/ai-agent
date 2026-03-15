@@ -12,11 +12,12 @@ Key features:
 - **Streaming** — print tokens as they arrive with `--stream true`
 - **Built-in tools** — the agent can call tools (readFile, writeFile, editFile, searchFiles, executeAux4, askUser, etc.) during execution
 - **askUser tool** — when the agent needs clarification it can prompt the user interactively; in non-interactive sessions it proceeds with best judgment
+- **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] <question>
+aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] <question>
 ```
 
 --instructions   Prompt instructions file (default: instructions.md)
@@ -29,7 +30,10 @@ aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--
 --stream         Enable streaming token output (default: false)
 --autoCompact    Enable auto-compaction of conversation history (default: false)
 --compaction     Compaction configuration as JSON (default: {})
+--permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
 question         The question to ask (positional argument)
+
+Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
 
 Auto-compaction requires both `--autoCompact true` and a `compaction` config with `contextWindow` set. When prompt tokens exceed the threshold (`contextWindow * maxContextPercent / 100`), older messages are automatically summarized.
 
@@ -73,4 +77,14 @@ With piped context:
 
 ```bash
 cat report.txt | aux4 ai agent ask --context true "Summarize the key findings"
+```
+
+With permissions (block file writes, allow everything else):
+
+```bash
+aux4 ai agent ask "Create a file called output.txt" --config --permissions '{"allow":["*","file:read:*"],"ask":[],"deny":["file:write:*"]}'
+```
+
+```text
+Permission denied: write "output.txt" is not allowed by the permissions configuration.
 ```
