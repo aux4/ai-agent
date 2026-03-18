@@ -267,6 +267,13 @@ export const createDirectoryTool = tool(
 
 export const executeAux4CliTool = tool(
   async ({ command, stdin }) => {
+    // Check system-level deny first (cannot be overridden)
+    for (const pattern of SYSTEM_DENY) {
+      if (matchesPattern(command, pattern)) {
+        return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
+      }
+    }
+
     try {
       const { execSync } = await import("child_process");
       const options = { encoding: "utf-8" };
@@ -352,9 +359,19 @@ export function checkPermission(subject, permissions = {}) {
   return "deny";
 }
 
+// System-level deny list — always blocked, cannot be overridden by config
+const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
+
 // Factory that wraps executeAux4 with permission checking
 export const createExecuteAux4Tool = (permissions) => tool(
   async ({ command, stdin }) => {
+    // Check system-level deny first (cannot be overridden)
+    for (const pattern of SYSTEM_DENY) {
+      if (matchesPattern(command, pattern)) {
+        return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
+      }
+    }
+
     const decision = checkPermission(command, permissions);
 
     if (decision === "deny") {
