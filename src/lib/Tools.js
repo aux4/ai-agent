@@ -19,6 +19,7 @@ import removeFilesDesc from "../docs/tools/removeFiles.md?raw";
 import searchContextDesc from "../docs/tools/searchContext.md?raw";
 import searchFilesDesc from "../docs/tools/searchFiles.md?raw";
 import askUserDesc from "../docs/tools/askUser.md?raw";
+import currentDateTimeDesc from "../docs/tools/currentDateTime.md?raw";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
@@ -1006,6 +1007,29 @@ export const searchFilesTool = tool(
   }
 );
 
+export const currentDateTimeTool = tool(
+  async () => {
+    const now = new Date();
+    const local = now.toLocaleString(undefined, {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short"
+    });
+    const utc = now.toISOString();
+    return `Local: ${local}\nUTC: ${utc}`;
+  },
+  {
+    name: "currentDateTime",
+    description: currentDateTimeDesc,
+    schema: z.object({})
+  }
+);
+
 export const createAskUserTool = () => tool(
   async ({ question }) => {
     if (!process.stdin.isTTY) {
@@ -1136,7 +1160,8 @@ export function createTools(config = {}) {
     removeFiles: permissions ? createRemoveFilesTool(permissions) : removeFilesTool,
     executeAux4: permissions ? createExecuteAux4Tool(permissions) : executeAux4CliTool,
     searchContext: createSearchContextTool(storage, embeddingsConfig),
-    askUser: createAskUserTool()
+    askUser: createAskUserTool(),
+    currentDateTime: currentDateTimeTool
   };
 }
 
@@ -1151,7 +1176,8 @@ const Tools = {
   removeFiles: removeFilesTool,
   executeAux4: executeAux4CliTool,
   searchContext: searchContextTool,
-  askUser: askUserTool
+  askUser: askUserTool,
+  currentDateTime: currentDateTimeTool
 };
 
 export default Tools;
