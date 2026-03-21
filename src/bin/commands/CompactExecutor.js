@@ -1,9 +1,15 @@
 import { readFileSync, writeFileSync } from "fs";
 import { compactMessages } from "../../lib/Compaction.js";
+import { resolveFromConfig } from "../../lib/ModelResolver.js";
 import "colors";
 
 export async function compactExecutor(params) {
-  const { historyFile, model, keepLastMessages } = params;
+  const { historyFile, keepLastMessages } = params;
+  const model = params.useModel
+    ? resolveFromConfig({ models: params.models }, params.useModel)
+    : (params.models && Object.keys(params.models).length > 0
+      ? resolveFromConfig({ models: params.models, model: params.model })
+      : params.model);
 
   if (!historyFile) {
     console.error("Error: No history file specified".red);

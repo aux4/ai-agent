@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions)"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel)"
           ],
           "help": {
             "text": "Ask your question",
@@ -202,6 +202,16 @@
                 "default": "{}"
               },
               {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use for this request",
+                "default": ""
+              },
+              {
                 "name": "question",
                 "text": "The question to ask",
                 "arg": true
@@ -267,8 +277,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -334,6 +344,16 @@
                 "default": "{}"
               },
               {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use for this request",
+                "default": ""
+              },
+              {
                 "name": "text",
                 "text": "The text",
                 "arg": true
@@ -361,7 +381,7 @@
         {
           "name": "summarize",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs summarize values(historyFile, model)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs summarize values(historyFile, model, models, useModel)"
           ],
           "help": {
             "text": "Summarize conversation history as markdown",
@@ -376,6 +396,16 @@
                 "name": "model",
                 "text": "Model configuration as JSON",
                 "default": "{}"
+              },
+              {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use",
+                "default": ""
               }
             ]
           }
@@ -383,7 +413,7 @@
         {
           "name": "remember",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs remember values(historyFile, model)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs remember values(historyFile, model, models, useModel)"
           ],
           "help": {
             "text": "Generate a concise memory entry from conversation history",
@@ -398,6 +428,16 @@
                 "name": "model",
                 "text": "Model configuration as JSON",
                 "default": "{}"
+              },
+              {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use",
+                "default": ""
               }
             ]
           }
@@ -405,7 +445,7 @@
         {
           "name": "compact",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs compact values(historyFile, model, keepLastMessages)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs compact values(historyFile, model, keepLastMessages, models, useModel)"
           ],
           "help": {
             "text": "Compact conversation history by summarizing older messages",
@@ -425,6 +465,32 @@
                 "name": "keepLastMessages",
                 "text": "Number of recent messages to keep verbatim",
                 "default": "6"
+              },
+              {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "models",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs models values(models)"
+          ],
+          "help": {
+            "text": "List available models from the registry",
+            "variables": [
+              {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
               }
             ]
           }

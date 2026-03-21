@@ -1,12 +1,17 @@
 import Prompt, { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
+import { resolveFromConfig } from "../../lib/ModelResolver.js";
 
 export async function askExecutor(params) {
   try {
     const baseInstructions = params.baseInstructions;
     const instructions = params.instructions;
-    const model = params.model;
+    const model = params.useModel
+      ? resolveFromConfig({ models: params.models }, params.useModel)
+      : (params.models && Object.keys(params.models).length > 0
+        ? resolveFromConfig({ models: params.models, model: params.model })
+        : params.model);
     const question = params.question;
     const role = params.role;
     const history = params.history;

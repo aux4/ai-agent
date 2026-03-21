@@ -22,6 +22,7 @@ import { historyExecutor } from "./commands/HistoryExecutor.js";
 import { compactExecutor } from "./commands/CompactExecutor.js";
 import { summarizeExecutor } from "./commands/SummarizeExecutor.js";
 import { rememberExecutor } from "./commands/RememberExecutor.js";
+import { modelsExecutor } from "./commands/ModelsExecutor.js";
 
 process.title = "aux4-agent";
 
@@ -34,7 +35,7 @@ process.title = "aux4-agent";
 
     if (!command) {
       console.log("Usage: aux4-agent <command> [options]");
-      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact");
+      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact, models");
       process.exit(1);
     }
 
@@ -76,7 +77,9 @@ process.title = "aux4-agent";
         autoCompact: args[12],
         compaction: JSON.parse(args[13] || "{}"),
         bio: JSON.parse(args[14] || "{}"),
-        permissions: JSON.parse(args[15] || "{}")
+        permissions: JSON.parse(args[15] || "{}"),
+        models: JSON.parse(args[16] || "{}"),
+        useModel: args[17] || ""
       });
     } else if (command === "image") {
       await imageExecutor({
@@ -95,22 +98,32 @@ process.title = "aux4-agent";
     } else if (command === "summarize") {
       await summarizeExecutor({
         historyFile: args[1],
-        model: JSON.parse(args[2] || "{}")
+        model: JSON.parse(args[2] || "{}"),
+        models: JSON.parse(args[3] || "{}"),
+        useModel: args[4] || ""
       });
     } else if (command === "remember") {
       await rememberExecutor({
         historyFile: args[1],
-        model: JSON.parse(args[2] || "{}")
+        model: JSON.parse(args[2] || "{}"),
+        models: JSON.parse(args[3] || "{}"),
+        useModel: args[4] || ""
       });
     } else if (command === "compact") {
       await compactExecutor({
         historyFile: args[1],
         model: JSON.parse(args[2] || "{}"),
-        keepLastMessages: parseInt(args[3] || "6")
+        keepLastMessages: parseInt(args[3] || "6"),
+        models: JSON.parse(args[4] || "{}"),
+        useModel: args[5] || ""
+      });
+    } else if (command === "models") {
+      await modelsExecutor({
+        models: JSON.parse(args[1] || "{}")
       });
     } else {
       console.error(`Unknown command: ${command}`.red);
-      console.log("Available commands: learn, search, forget, ask, image, history, summarize, compact");
+      console.log("Available commands: learn, search, forget, ask, image, history, summarize, remember, compact, models");
       process.exit(1);
     }
   } catch (e) {
