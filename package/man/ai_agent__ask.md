@@ -33,7 +33,7 @@ aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--
 --compaction     Compaction configuration as JSON (default: {})
 --permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
 --models         Models registry as JSON (default: {})
---useModel       Named model from registry to use for this request (default: "")
+--useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.

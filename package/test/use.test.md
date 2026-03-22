@@ -18,14 +18,18 @@ aux4 ai agent ask --models '{"fast":{"type":"openai","config":{"model":"gpt-4o-m
 
 ## ask with unknown --use
 
-### should fail with unknown model name
+### should fallback to default model
 
-```execute
-aux4 ai agent ask --models '{"fast":{"type":"openai","config":{"model":"gpt-4o-mini"}}}' --useModel nonexistent --question "hello"
+```timeout
+60000
 ```
 
-```error:partial
-Unknown model "nonexistent"*
+```execute
+aux4 ai agent ask --models '{"fast":{"type":"openai","config":{"model":"gpt-4o-mini"}}}' --useModel nonexistent --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}' --question "What is 2+2? Reply with just the number."
+```
+
+```expect:partial
+4
 ```
 
 ## models command

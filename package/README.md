@@ -366,6 +366,8 @@ The `--useModel` flag works on `ask`, `chat`, `summarize`, `remember`, and `comp
 
 If `--useModel` is not provided, the default `model` is used — no change to existing behavior.
 
+**Graceful fallback:** If the name passed to `--useModel` is not found in the registry, the agent silently falls back to the default `model`. This allows skills and agents to request model intents (e.g., `conversation`, `vision`) without requiring every deployment to configure them.
+
 ### Listing available models
 
 ```bash

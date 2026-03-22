@@ -6,7 +6,7 @@ import "colors";
 export async function compactExecutor(params) {
   const { historyFile, keepLastMessages } = params;
   const model = params.useModel
-    ? resolveFromConfig({ models: params.models }, params.useModel)
+    ? resolveFromConfig({ models: params.models, model: params.model }, params.useModel)
     : (params.models && Object.keys(params.models).length > 0
       ? resolveFromConfig({ models: params.models, model: params.model })
       : params.model);
