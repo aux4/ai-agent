@@ -20,6 +20,7 @@ import searchContextDesc from "../docs/tools/searchContext.md?raw";
 import searchFilesDesc from "../docs/tools/searchFiles.md?raw";
 import askUserDesc from "../docs/tools/askUser.md?raw";
 import currentDateTimeDesc from "../docs/tools/currentDateTime.md?raw";
+import readReferenceDesc from "../docs/tools/readReference.md?raw";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
@@ -1030,6 +1031,54 @@ export const currentDateTimeTool = tool(
   }
 );
 
+export const createReadReferenceTool = (referencesDir) => tool(
+  async ({ file }) => {
+    try {
+      if (!referencesDir) {
+        return "No references directory configured.";
+      }
+
+      const resolvedDir = path.resolve(referencesDir);
+
+      if (!fs.existsSync(resolvedDir)) {
+        return "References directory not found.";
+      }
+
+      if (!file) {
+        const files = [];
+        function walk(dir) {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              walk(full);
+            } else if (entry.name.endsWith(".md")) {
+              files.push(path.relative(resolvedDir, full));
+            }
+          }
+        }
+        walk(resolvedDir);
+        if (files.length === 0) return "No reference documents found.";
+        return files.join("\n");
+      }
+
+      const filePath = path.resolve(resolvedDir, file);
+      if (!filePath.startsWith(resolvedDir)) return "Access denied";
+      if (!fs.existsSync(filePath)) return `Reference "${file}" not found.`;
+
+      return fs.readFileSync(filePath, { encoding: "utf-8" });
+    } catch (e) {
+      return e.message;
+    }
+  },
+  {
+    name: "readReference",
+    description: readReferenceDesc,
+    schema: z.object({
+      file: z.string().optional().describe("The reference file name to read. Omit to list available references.")
+    })
+  }
+);
+
 export const createAskUserTool = () => tool(
   async ({ question }) => {
     if (!process.stdin.isTTY) {
@@ -1147,7 +1196,7 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
 export const searchContextTool = createSearchContextTool();
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions } = config;
+  const { storage, embeddingsConfig, permissions, references } = config;
 
   return {
     readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
@@ -1161,7 +1210,8 @@ export function createTools(config = {}) {
     executeAux4: permissions ? createExecuteAux4Tool(permissions) : executeAux4CliTool,
     searchContext: createSearchContextTool(storage, embeddingsConfig),
     askUser: createAskUserTool(),
-    currentDateTime: currentDateTimeTool
+    currentDateTime: currentDateTimeTool,
+    readReference: createReadReferenceTool(references)
   };
 }
 
@@ -1177,7 +1227,8 @@ const Tools = {
   executeAux4: executeAux4CliTool,
   searchContext: searchContextTool,
   askUser: askUserTool,
-  currentDateTime: currentDateTimeTool
+  currentDateTime: currentDateTimeTool,
+  readReference: createReadReferenceTool()
 };
 
 export default Tools;

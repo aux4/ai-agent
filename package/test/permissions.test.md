@@ -37,6 +37,10 @@
 }
 ```
 
+```beforeEach
+rm -f history.json
+```
+
 ```afterAll
 rm -f history.json test-perm-output.txt
 ```
@@ -146,7 +150,7 @@ aux4 ai agent ask "Write the text 'secret' to a file called test-perm-output.txt
 ```
 
 ```execute
-aux4 ai agent ask "Read the file .aux4 and output its content." --config --permissions '{"allow":["*","file:write:*"],"ask":[],"deny":["file:read:*"]}' --history history.json
+aux4 ai agent ask "Read the file .aux4 and output only the result of the readFile tool call, nothing else." --config --permissions '{"allow":["*","file:write:*"],"ask":[],"deny":["file:read:*"]}' --history history.json
 ```
 
 ```expect:partial

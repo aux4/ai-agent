@@ -66,7 +66,7 @@ aux4 ai agent history
 ```
 
 ```expect:partial
-executeAux4(command: print-name --firstName John --lastName Doe)
+executeAux4(command: print-name --firstName *John* --lastName *Doe*)
 ```
 
 ```expect:partial

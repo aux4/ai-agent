@@ -432,7 +432,7 @@ class Prompt {
     if (!this.historyFile) return;
     try {
       const simplifiedMessages = this.messages
-        .filter(message => message.role !== "system")
+        .filter(message => message.role !== "system" || message.timestamp)
         .map(message => {
           if (message.role === "tool") {
             return {

@@ -79,7 +79,9 @@ process.title = "aux4-agent";
         bio: JSON.parse(args[14] || "{}"),
         permissions: JSON.parse(args[15] || "{}"),
         models: JSON.parse(args[16] || "{}"),
-        useModel: args[17] || ""
+        useModel: args[17] || "",
+        references: args[18] || "",
+        packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {
       await imageExecutor({

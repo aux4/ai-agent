@@ -63,6 +63,7 @@ Key variables (from the package help):
 - permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
+- references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples (from tests):
@@ -412,6 +413,8 @@ The agent comes with a set of built-in tools that the LLM can call during execut
 | `executeAux4` | Run any aux4 command |
 | `searchContext` | Query the local vector store for relevant context |
 | `askUser` | Ask the user a question and wait for their typed response |
+| `currentDateTime` | Get the current date and time in local and UTC formats |
+| `readReference` | List or read reference documents from the references directory |
 
 ### askUser
 
@@ -424,6 +427,65 @@ The `askUser` tool lets the agent prompt the user interactively when it needs cl
 ### searchFiles
 
 The `searchFiles` tool performs a case-insensitive text search across project files. It supports filtering by file extension, excluding directories, and limiting results. The agent uses this to find relevant code or content without reading every file.
+
+### currentDateTime
+
+The `currentDateTime` tool returns the current date and time in both local and UTC formats. The agent calls this when it needs to know the current date, time, day of the week, or timezone. It takes no parameters.
+
+### readReference
+
+The `readReference` tool gives the agent on-demand access to reference documents without loading them all into the prompt. This keeps the system prompt small while still making detailed knowledge available.
+
+- **List references:** Call with no `file` parameter to get a list of all available `.md` files.
+- **Read a reference:** Call with a `file` parameter (e.g., `api/endpoints.md`) to read its content.
+
+The tool searches the references directory recursively, so nested folders are supported. File paths returned by the list operation are relative to the references root (e.g., `guides/setup.md`).
+
+By default, the references directory is `${packageDir}/references` — any agent package can ship reference documents by placing `.md` files there. Override with `--references <path>` to use a custom directory.
+
+---
+
+## References
+
+Reference documents let you provide detailed knowledge to the agent without bloating the system prompt. Instead of putting everything in `instructions.md`, place detailed documents in a `references/` directory and the agent will look them up on demand using the `readReference` tool.
+
+### Setup
+
+Create a `references/` directory in your package with `.md` files:
+
+```
+my-agent/
+├── package/
+│   ├── .aux4
+│   ├── references/
+│   │   ├── api.md
+│   │   ├── database.md
+│   │   └── guides/
+│   │       ├── setup.md
+│   │       └── deployment.md
+│   └── ...
+```
+
+Nested folders are supported — the agent sees them as relative paths like `guides/setup.md`.
+
+### Usage
+
+Mention the references in your `instructions.md` so the agent knows to look them up:
+
+```markdown
+You are a project assistant. When the user asks about the API or database,
+check the references for detailed documentation before answering.
+```
+
+The agent will automatically call `readReference` to list available documents and read the relevant ones.
+
+### Custom References Path
+
+Override the default path with `--references`:
+
+```bash
+aux4 ai agent ask "How do I deploy?" --references ./docs/references
+```
 
 ---
 

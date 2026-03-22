@@ -1,3 +1,4 @@
+import path from "path";
 import Prompt, { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
@@ -23,6 +24,7 @@ export async function askExecutor(params) {
     const compaction = autoCompact ? params.compaction : null;
     const bio = params.bio;
     const permissions = params.permissions;
+    const references = params.references || (params.packageDir ? path.join(params.packageDir, "references") : "");
 
     let contextContent;
     if (context === true || context === "true") {
@@ -38,6 +40,9 @@ export async function askExecutor(params) {
     const toolsConfig = storage ? { storage } : {};
     if (permissions && typeof permissions === "object" && Object.keys(permissions).length > 0) {
       toolsConfig.permissions = permissions;
+    }
+    if (references) {
+      toolsConfig.references = references;
     }
 
     const prompt = new Prompt(model, toolsConfig, { compaction });

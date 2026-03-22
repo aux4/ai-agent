@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel)"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Ask your question",
@@ -212,6 +212,11 @@
                 "default": ""
               },
               {
+                "name": "references",
+                "text": "Path to the references directory",
+                "default": ""
+              },
+              {
                 "name": "question",
                 "text": "The question to ask",
                 "arg": true
@@ -277,8 +282,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -351,6 +356,11 @@
               {
                 "name": "useModel",
                 "text": "Named model from registry to use for this request",
+                "default": ""
+              },
+              {
+                "name": "references",
+                "text": "Path to the references directory",
                 "default": ""
               },
               {
