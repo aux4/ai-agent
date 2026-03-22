@@ -7,11 +7,13 @@ The summarizer skips tool call invocations and extracts only the meaningful text
 #### Usage
 
 ```bash
-aux4 ai agent summarize [<historyFile>] [--model <json>]
+aux4 ai agent summarize [<historyFile>] [--model <json>] [--models <json>] [--useModel <name>]
 ```
 
 historyFile   Path to the history JSON file (default: history.json)
---model       Model configuration JSON for the summarization model (required)
+--model       Model configuration JSON for the summarization model (required unless --useModel is set)
+--models      Models registry as JSON (default: {})
+--useModel    Named model from registry to use (default: "")
 
 #### Example
 
@@ -31,4 +33,10 @@ Store summary in the knowledge base:
 
 ```bash
 aux4 ai agent summarize history.json --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}' > summary.md && aux4 ai agent learn summary.md
+```
+
+Summarize using a named model from registry:
+
+```bash
+aux4 ai agent summarize history.json --configFile config.yaml --config agent --useModel fast
 ```

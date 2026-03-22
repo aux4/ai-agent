@@ -61,6 +61,8 @@ Key variables (from the package help):
 - storage (default: .llm) — the storage directory for the vector store.
 - stream (default: "false") — enable streaming output (tokens are printed as they arrive).
 - permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
+- models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
+- useModel (default: "") — named model from registry to use for this request.
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples (from tests):
@@ -318,6 +320,76 @@ Notes:
 - When quantity > 1, files are created with numbered prefixes (e.g., 1-multi-test.png, 2-multi-test.png, ...).
 
 For more details see [aux4 ai agent image](./commands/ai/agent/image).
+
+---
+
+## Model Selection
+
+The agent supports a named model registry so you can define multiple models and select one by name with `--useModel` instead of passing inline model JSON every time.
+
+### Configuration
+
+Define named models in your `config.yaml`:
+
+```yaml
+config:
+  agent:
+    models:
+      strong:
+        type: bedrock
+        config:
+          model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+        description: "Complex reasoning, code generation, multi-step analysis"
+      fast:
+        type: bedrock
+        config:
+          model: global.anthropic.claude-haiku-4-5-20251001-v1:0
+        description: "Simple questions, factual lookups, formatting, routine tasks"
+    model:
+      type: bedrock
+      config:
+        model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+```
+
+- `model` — the default model used when `--useModel` is not provided
+- `models` — optional registry of named models, each with `type`, `config`, and optional `description`
+
+### Usage
+
+Select a named model with `--useModel`:
+
+```bash
+aux4 ai agent ask --configFile config.yaml --config agent --useModel fast "What is 2+2?"
+```
+
+The `--useModel` flag works on `ask`, `chat`, `summarize`, `remember`, and `compact` commands.
+
+If `--useModel` is not provided, the default `model` is used — no change to existing behavior.
+
+### Listing available models
+
+```bash
+aux4 ai agent models --configFile config.yaml --config agent
+```
+
+```text
+  strong  bedrock  global.anthropic.claude-sonnet-4-5-20250929-v1:0  Complex reasoning, code generation, multi-step analysis
+  fast    bedrock  global.anthropic.claude-haiku-4-5-20251001-v1:0   Simple questions, factual lookups, formatting, routine tasks
+```
+
+### Self-delegation
+
+Agents can delegate tasks to themselves using different models. For example, use the fast model for simple lookups and the strong model for complex reasoning:
+
+```bash
+# Simple task — use fast model
+aux4 ai agent ask --useModel fast --instructions agent.md "Summarize this paragraph"
+
+# Complex task — use strong model
+aux4 ai agent ask --useModel strong --instructions agent.md "Analyze this codebase and suggest improvements"
+```
+
+For more details see [aux4 ai agent models](./commands/ai/agent/models).
 
 ---
 

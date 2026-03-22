@@ -7,7 +7,7 @@ The chat command supports all the same features as the ask command (instructions
 #### Usage
 
 ```bash
-aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] <text>
+aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] <text>
 ```
 
 --instructions   Prompt instructions file (default: instructions.md)
@@ -21,6 +21,8 @@ aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [-
 --autoCompact    Enable auto-compaction of conversation history (default: false)
 --compaction     Compaction configuration as JSON (default: {})
 --permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
+--models         Models registry as JSON (default: {})
+--useModel       Named model from registry to use for this request (default: "")
 text             Initial text to send (positional argument)
 
 #### Example

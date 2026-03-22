@@ -13,11 +13,12 @@ Key features:
 - **Built-in tools** — the agent can call tools (readFile, writeFile, editFile, searchFiles, executeAux4, askUser, etc.) during execution
 - **askUser tool** — when the agent needs clarification it can prompt the user interactively; in non-interactive sessions it proceeds with best judgment
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
+- **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] <question>
+aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] <question>
 ```
 
 --instructions   Prompt instructions file (default: instructions.md)
@@ -31,6 +32,8 @@ aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--
 --autoCompact    Enable auto-compaction of conversation history (default: false)
 --compaction     Compaction configuration as JSON (default: {})
 --permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
+--models         Models registry as JSON (default: {})
+--useModel       Named model from registry to use for this request (default: "")
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -87,4 +90,10 @@ aux4 ai agent ask "Create a file called output.txt" --config --permissions '{"al
 
 ```text
 Permission denied: write "output.txt" is not allowed by the permissions configuration.
+```
+
+With a named model from registry:
+
+```bash
+aux4 ai agent ask --configFile config.yaml --config agent --useModel fast "What is 2+2?"
 ```
