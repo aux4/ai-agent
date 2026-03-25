@@ -12,25 +12,30 @@ This tool is your **gateway to the aux4 universe** - a powerful command system t
 | --------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
 | `command` | string | ✅ Yes   | The aux4 command to execute. **Do NOT include** the `aux4` prefix - just provide the nested actions and parameters |
 | `stdin`   | string | ❌ No    | Optional data to pass as stdin to the command. Use this for commands that read input from stdin (e.g., `pdf fill`, `pdf form`) |
-| `timeout` | number | ❌ No    | Timeout in seconds. Defaults to **60**. Set to `0` to disable timeout. If the command exceeds this limit, the process is killed and an error is returned with instructions to retry using `aux4 jobs run` for background execution |
+| `timeout` | number | ❌ No    | Timeout in seconds. Defaults to **60**. Set to `0` to disable timeout. If the command exceeds this limit, it is automatically transferred to a background job (if aux4/jobs is installed) or killed |
 
 ## ⏱️ Timeout Behavior
 
 Commands have a **60-second default timeout**. If a command exceeds the timeout:
 
-1. The process is **killed**
-2. An error message is returned explaining the timeout
-3. The error suggests retrying with `aux4 jobs run` for background execution
+1. The process is **automatically transferred** to a background job via `aux4 jobs attach` (if aux4/jobs is installed)
+2. You receive the **job ID** and can manage it with `jobs status`, `jobs output`, `jobs kill`
+3. **Partial output** captured before the timeout is included in the response
+4. If aux4/jobs is **not available**, the process is killed and you're told to retry with `jobs run`
+
+**Output handling:**
+- All command output (stdout/stderr) is written to temporary files during execution
+- If output exceeds ~50KB, it is **truncated** in the response with a pointer to the full file
+- On timeout with job attachment, output files are **symlinked** into the job directory — use `jobs output <id>` to read them
 
 **When to adjust the timeout:**
 - Most commands (config, file ops, lookups) finish in seconds — the default is fine
-- For commands you know will be fast, you can leave the default
 - For commands that may take longer (large file processing, API calls), increase the timeout
 - Set `timeout: 0` to disable the timeout entirely (use with caution)
 
-**When to use `aux4 jobs run` instead:**
-- Builds, deployments, and long-running processes — use `jobs run` proactively rather than setting a large timeout
-- If a command times out, retry it with `jobs run` as the error message suggests
+**When to use `aux4 jobs run` proactively:**
+- Builds, deployments, test suites, and other known long-running processes
+- Use `jobs run` directly instead of waiting for the timeout to fire
 
 ## 📥 Passing Data via stdin
 

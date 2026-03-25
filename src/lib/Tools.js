@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import readline from "node:readline";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
@@ -269,48 +269,187 @@ export const createDirectoryTool = tool(
 );
 
 const DEFAULT_TIMEOUT = 60000;
+const MAX_OUTPUT_LENGTH = 50000;
 
 function executeWithTimeout(cmd, { stdin, timeout } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
-  const options = {
-    encoding: "utf-8",
-    shell: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  };
+  const tmpDir = os.tmpdir();
+  const id = `aux4-exec-${process.pid}-${Date.now()}`;
+  const stdoutPath = path.join(tmpDir, `${id}.stdout`);
+  const stderrPath = path.join(tmpDir, `${id}.stderr`);
 
-  if (timeoutMs > 0) {
-    options.timeout = timeoutMs;
-  }
+  const stdoutFd = fs.openSync(stdoutPath, "w");
+  const stderrFd = fs.openSync(stderrPath, "w");
 
-  if (stdin) {
-    options.input = stdin;
-  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
 
-  const result = spawnSync(cmd, [], options);
-
-  if (result.error) {
-    if (result.error.code === "ETIMEDOUT") {
-      // spawnSync already killed the direct child, but we need to ensure
-      // no orphan processes remain. The pid is gone at this point, but
-      // spawnSync with shell:true sends SIGTERM to the shell process.
-      const error = new Error(`Command timed out: ${cmd}`);
-      error.timedOut = true;
-      throw error;
+    function closeFds() {
+      try { fs.closeSync(stdoutFd); } catch {}
+      try { fs.closeSync(stderrFd); } catch {}
     }
-    throw result.error;
+
+    const child = spawn("sh", ["-c", cmd], {
+      stdio: ["pipe", stdoutFd, stderrFd],
+      detached: false,
+    });
+
+    if (stdin) {
+      child.stdin.write(stdin);
+      child.stdin.end();
+    } else {
+      child.stdin.end();
+    }
+
+    let timer;
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+
+        // Detach: unref so Node doesn't wait for it
+        child.unref();
+        closeFds();
+
+        const partialOutput = readOutputFile(stdoutPath, 2000);
+
+        // Try to attach to aux4 jobs
+        try {
+          const attachResult = spawnSync("aux4", [
+            "jobs", "attach", String(child.pid), cmd,
+            "--stdout", stdoutPath, "--stderr", stderrPath
+          ], { encoding: "utf-8", timeout: 5000 });
+
+          if (attachResult.status === 0 && attachResult.stdout) {
+            const job = JSON.parse(attachResult.stdout.trim());
+            const error = new Error("timeout_attached");
+            error.timedOut = true;
+            error.attached = true;
+            error.jobId = job.id;
+            error.partialOutput = partialOutput;
+            return reject(error);
+          }
+        } catch {}
+
+        // aux4 jobs not available — kill the process
+        try { process.kill(child.pid, "SIGTERM"); } catch {}
+        cleanupTempFiles(stdoutPath, stderrPath);
+
+        const error = new Error("timeout_killed");
+        error.timedOut = true;
+        error.attached = false;
+        error.partialOutput = partialOutput;
+        reject(error);
+      }, timeoutMs);
+    }
+
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      closeFds();
+
+      if (code !== 0) {
+        const stderr = readOutputFile(stderrPath, MAX_OUTPUT_LENGTH);
+        const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
+        cleanupTempFiles(stdoutPath, stderrPath);
+        const output = stderr || stdout || `Process exited with code ${code}`;
+        const error = new Error(output);
+        error.timedOut = false;
+        return reject(error);
+      }
+
+      const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
+      const fullSize = getFileSize(stdoutPath);
+      cleanupTempFiles(stdoutPath, stderrPath);
+
+      if (fullSize > MAX_OUTPUT_LENGTH) {
+        resolve(stdout + `\n\n[Output truncated: ${fullSize} bytes total. Full output was written to ${stdoutPath}]`);
+      } else {
+        resolve(stdout);
+      }
+    });
+
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      closeFds();
+      cleanupTempFiles(stdoutPath, stderrPath);
+      reject(err);
+    });
+  });
+}
+
+function readOutputFile(filePath, maxBytes) {
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size === 0) return "";
+    if (stat.size <= maxBytes) {
+      return fs.readFileSync(filePath, "utf-8");
+    }
+    // Read the last maxBytes
+    const fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(maxBytes);
+    fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
+    fs.closeSync(fd);
+    return "[...truncated...]\n" + buffer.toString("utf-8");
+  } catch {
+    return "";
+  }
+}
+
+function getFileSize(filePath) {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+function cleanupTempFiles(...paths) {
+  for (const p of paths) {
+    try { fs.unlinkSync(p); } catch {}
+  }
+}
+
+function formatTimeoutMessage(command, timeout, error) {
+  const timeoutSec = timeout === 0 ? 0 : (timeout || 60);
+
+  if (error.attached) {
+    const lines = [
+      `TIMEOUT: "aux4 ${command}" exceeded ${timeoutSec} seconds and was transferred to background job #${error.jobId}.`,
+    ];
+    if (error.partialOutput) {
+      lines.push(``, `Partial output:`, error.partialOutput);
+    }
+    lines.push(
+      ``,
+      `The command is still running. Use these to manage it:`,
+      `  executeAux4("jobs status ${error.jobId}")  → check if RUNNING or COMPLETED`,
+      `  executeAux4("jobs output ${error.jobId}")  → get the full output when done`,
+      `  executeAux4("jobs kill ${error.jobId}")    → terminate if needed`,
+    );
+    return lines.join("\n");
   }
 
-  if (result.status !== 0) {
-    const stderr = result.stderr ? result.stderr.trim() : "";
-    const stdout = result.stdout ? result.stdout.trim() : "";
-    const output = stderr || stdout || `Process exited with code ${result.status}`;
-    const error = new Error(output);
-    error.timedOut = false;
-    throw error;
+  // Process was killed (aux4 jobs not available)
+  const lines = [
+    `TIMEOUT: "aux4 ${command}" was killed after ${timeoutSec} seconds.`,
+  ];
+  if (error.partialOutput) {
+    lines.push(``, `Partial output captured before kill:`, error.partialOutput);
   }
-
-  return result.stdout;
+  lines.push(
+    ``,
+    `Action required: re-run this command as a background job so it can complete without blocking.`,
+    ``,
+    `Step 1: executeAux4("jobs run \\"aux4 ${command}\\"")  → returns a job ID`,
+    `Step 2: executeAux4("jobs status <id>")  → check if RUNNING or COMPLETED`,
+    `Step 3: executeAux4("jobs output <id>")  → get the full output once completed`,
+  );
+  return lines.join("\n");
 }
 
 export const executeAux4CliTool = tool(
@@ -323,20 +462,11 @@ export const executeAux4CliTool = tool(
     }
 
     try {
-      const result = executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
+      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
       return result;
     } catch (error) {
       if (error.timedOut) {
-        const timeoutSec = timeout === 0 ? 0 : (timeout || 60);
-        return [
-          `TIMEOUT: "aux4 ${command}" was killed after ${timeoutSec} seconds. No output was captured.`,
-          ``,
-          `Action required: re-run this command as a background job so it can complete without blocking.`,
-          ``,
-          `Step 1: executeAux4("jobs run \\"aux4 ${command}\\"")  → returns a job ID`,
-          `Step 2: executeAux4("jobs status <id>")  → check if RUNNING or COMPLETED`,
-          `Step 3: executeAux4("jobs output <id>")  → get the full output once completed`,
-        ].join("\n");
+        return formatTimeoutMessage(command, timeout, error);
       }
       return `Error executing command: ${error.message}`;
     }
@@ -347,7 +477,7 @@ export const executeAux4CliTool = tool(
     schema: z.object({
       command: z.string(),
       stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, it is killed and an error is returned suggesting background execution with aux4 jobs.")
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed.")
     })
   }
 );
@@ -464,20 +594,11 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const result = executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
+      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
       return result;
     } catch (error) {
       if (error.timedOut) {
-        const timeoutSec = timeout === 0 ? 0 : (timeout || 60);
-        return [
-          `TIMEOUT: "aux4 ${command}" was killed after ${timeoutSec} seconds. No output was captured.`,
-          ``,
-          `Action required: re-run this command as a background job so it can complete without blocking.`,
-          ``,
-          `Step 1: executeAux4("jobs run \\"aux4 ${command}\\"")  → returns a job ID`,
-          `Step 2: executeAux4("jobs status <id>")  → check if RUNNING or COMPLETED`,
-          `Step 3: executeAux4("jobs output <id>")  → get the full output once completed`,
-        ].join("\n");
+        return formatTimeoutMessage(command, timeout, error);
       }
       return `Error executing command: ${error.message}`;
     }
@@ -488,7 +609,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
     schema: z.object({
       command: z.string(),
       stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, it is killed and an error is returned suggesting background execution with aux4 jobs.")
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed.")
     })
   }
 );
