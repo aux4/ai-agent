@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { spawnSync } from "child_process";
 import readline from "node:readline";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
@@ -267,8 +268,53 @@ export const createDirectoryTool = tool(
   }
 );
 
+const DEFAULT_TIMEOUT = 60000;
+
+function executeWithTimeout(cmd, { stdin, timeout } = {}) {
+  const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
+
+  const options = {
+    encoding: "utf-8",
+    shell: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  };
+
+  if (timeoutMs > 0) {
+    options.timeout = timeoutMs;
+  }
+
+  if (stdin) {
+    options.input = stdin;
+  }
+
+  const result = spawnSync(cmd, [], options);
+
+  if (result.error) {
+    if (result.error.code === "ETIMEDOUT") {
+      // spawnSync already killed the direct child, but we need to ensure
+      // no orphan processes remain. The pid is gone at this point, but
+      // spawnSync with shell:true sends SIGTERM to the shell process.
+      const error = new Error(`Command timed out: ${cmd}`);
+      error.timedOut = true;
+      throw error;
+    }
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    const stderr = result.stderr ? result.stderr.trim() : "";
+    const stdout = result.stdout ? result.stdout.trim() : "";
+    const output = stderr || stdout || `Process exited with code ${result.status}`;
+    const error = new Error(output);
+    error.timedOut = false;
+    throw error;
+  }
+
+  return result.stdout;
+}
+
 export const executeAux4CliTool = tool(
-  async ({ command, stdin }) => {
+  async ({ command, stdin, timeout }) => {
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
       if (matchesPattern(command, pattern)) {
@@ -277,14 +323,21 @@ export const executeAux4CliTool = tool(
     }
 
     try {
-      const { execSync } = await import("child_process");
-      const options = { encoding: "utf-8" };
-      if (stdin) {
-        options.input = stdin;
-      }
-      const result = execSync(`aux4 ${command}`, options);
+      const result = executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
       return result;
     } catch (error) {
+      if (error.timedOut) {
+        const timeoutSec = timeout === 0 ? 0 : (timeout || 60);
+        return [
+          `TIMEOUT: "aux4 ${command}" was killed after ${timeoutSec} seconds. No output was captured.`,
+          ``,
+          `Action required: re-run this command as a background job so it can complete without blocking.`,
+          ``,
+          `Step 1: executeAux4("jobs run \\"aux4 ${command}\\"")  → returns a job ID`,
+          `Step 2: executeAux4("jobs status <id>")  → check if RUNNING or COMPLETED`,
+          `Step 3: executeAux4("jobs output <id>")  → get the full output once completed`,
+        ].join("\n");
+      }
       return `Error executing command: ${error.message}`;
     }
   },
@@ -293,7 +346,8 @@ export const executeAux4CliTool = tool(
     description: executeAux4Desc,
     schema: z.object({
       command: z.string(),
-      stdin: z.string().optional().describe("Optional data to pass as stdin to the command")
+      stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, it is killed and an error is returned suggesting background execution with aux4 jobs.")
     })
   }
 );
@@ -366,7 +420,7 @@ const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
 
 // Factory that wraps executeAux4 with permission checking
 export const createExecuteAux4Tool = (permissions) => tool(
-  async ({ command, stdin }) => {
+  async ({ command, stdin, timeout }) => {
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
       if (matchesPattern(command, pattern)) {
@@ -410,14 +464,21 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const { execSync } = await import("child_process");
-      const options = { encoding: "utf-8" };
-      if (stdin) {
-        options.input = stdin;
-      }
-      const result = execSync(`aux4 ${command}`, options);
+      const result = executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
       return result;
     } catch (error) {
+      if (error.timedOut) {
+        const timeoutSec = timeout === 0 ? 0 : (timeout || 60);
+        return [
+          `TIMEOUT: "aux4 ${command}" was killed after ${timeoutSec} seconds. No output was captured.`,
+          ``,
+          `Action required: re-run this command as a background job so it can complete without blocking.`,
+          ``,
+          `Step 1: executeAux4("jobs run \\"aux4 ${command}\\"")  → returns a job ID`,
+          `Step 2: executeAux4("jobs status <id>")  → check if RUNNING or COMPLETED`,
+          `Step 3: executeAux4("jobs output <id>")  → get the full output once completed`,
+        ].join("\n");
+      }
       return `Error executing command: ${error.message}`;
     }
   },
@@ -426,7 +487,8 @@ export const createExecuteAux4Tool = (permissions) => tool(
     description: executeAux4Desc,
     schema: z.object({
       command: z.string(),
-      stdin: z.string().optional().describe("Optional data to pass as stdin to the command")
+      stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, it is killed and an error is returned suggesting background execution with aux4 jobs.")
     })
   }
 );
