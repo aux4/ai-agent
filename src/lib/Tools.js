@@ -362,11 +362,13 @@ function executeWithTimeout(cmd, { stdin, timeout } = {}) {
 
       const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
       const fullSize = getFileSize(stdoutPath);
-      cleanupTempFiles(stdoutPath, stderrPath);
 
       if (fullSize > MAX_OUTPUT_LENGTH) {
+        // Keep stdout file so the agent can read the full output; only clean stderr
+        cleanupTempFiles(null, stderrPath);
         resolve(stdout + `\n\n[Output truncated: ${fullSize} bytes total. Full output was written to ${stdoutPath}]`);
       } else {
+        cleanupTempFiles(stdoutPath, stderrPath);
         resolve(stdout);
       }
     });
