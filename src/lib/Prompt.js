@@ -451,21 +451,19 @@ class Prompt {
       const data = JSON.stringify(simplifiedMessages);
       if (data.length < 3) return;
 
-      // Don't overwrite with less data than what's on disk (unless compacted)
+      // Skip writing if file on disk is larger (avoids clobbering from a
+      // concurrent process). Allow writes when compacted, when the file is
+      // small (seed-only), or when the difference is modest (format change).
       if (!this.compacted) {
         try {
           const existing = fs.statSync(this.historyFile);
-          if (existing.size > data.length) return;
+          if (existing.size > data.length * 1.5 && existing.size > 1024) return;
         } catch {}
       }
 
-      if (sync) {
-        fs.writeFileSync(this.historyFile, data);
-      } else {
-        fs.writeFile(this.historyFile, data, (err) => {
-          if (err) console.error("Error writing history file:", err.message);
-        });
-      }
+      // Always write synchronously to prevent 0-byte files from async
+      // truncation when the process exits before the write completes.
+      fs.writeFileSync(this.historyFile, data);
     } catch (error) {
       console.error("Error writing history file:", error.message);
     }

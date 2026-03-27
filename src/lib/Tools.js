@@ -269,7 +269,7 @@ export const createDirectoryTool = tool(
 );
 
 const DEFAULT_TIMEOUT = 60000;
-const MAX_OUTPUT_LENGTH = 50000;
+const MAX_OUTPUT_LENGTH = 10000;
 
 function executeWithTimeout(cmd, { stdin, timeout } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
