@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "0.1.49",
+  "version": "0.2.0",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -374,7 +374,7 @@
         {
           "name": "history",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs history values(historyFile)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs history values(historyFile, cost.in, cost.out, cost.cache)"
           ],
           "help": {
             "text": "Display a formatted view of conversation history",
@@ -384,6 +384,21 @@
                 "text": "The history JSON file to display",
                 "default": "history.json",
                 "arg": true
+              },
+              {
+                "name": "cost.in",
+                "text": "Cost per 1M input tokens (e.g. 3.0 for Claude Sonnet)",
+                "default": "0"
+              },
+              {
+                "name": "cost.out",
+                "text": "Cost per 1M output tokens (e.g. 15.0 for Claude Sonnet)",
+                "default": "0"
+              },
+              {
+                "name": "cost.cache",
+                "text": "Cost per 1M cached input tokens (e.g. 0.30 for Claude Sonnet)",
+                "default": "0"
               }
             ]
           }

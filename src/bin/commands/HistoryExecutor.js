@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import "colors";
 
 export const historyExecutor = async options => {
-  const { historyFile } = options;
+  const { historyFile, costIn = 0, costOut = 0, costCache = 0 } = options;
 
   if (!historyFile) {
     console.error("Error: No history file specified".red);
@@ -11,14 +11,57 @@ export const historyExecutor = async options => {
 
   try {
     const historyContent = readFileSync(historyFile, "utf8");
-    const history = JSON.parse(historyContent);
+    const parsed = JSON.parse(historyContent);
 
-    if (!Array.isArray(history)) {
-      console.error("Error: Invalid history file format - expected an array".red);
+    let history;
+    let tokenUsage = null;
+    if (Array.isArray(parsed)) {
+      history = parsed;
+    } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.messages)) {
+      history = parsed.messages;
+      tokenUsage = parsed.tokenUsage || null;
+    } else {
+      console.error("Error: Invalid history file format - expected an array or { messages, tokenUsage }".red);
       process.exit(1);
     }
 
+    const formatTokenUsage = (label, usage) => {
+      const fmt = n => Number(n || 0).toLocaleString("en-US");
+      const lines = [`${label.cyan.bold}`];
+      lines.push(`  - ${"input".gray}: ${fmt(usage.input).yellow}`);
+      if (usage.cached) {
+        lines.push(`  - ${"cached".gray}: ${fmt(usage.cached).yellow}`);
+      }
+      lines.push(`  - ${"output".gray}: ${fmt(usage.output).yellow}`);
+      lines.push(`  - ${"total".gray}: ${fmt(usage.total).yellow}`);
+      return lines.join("\n");
+    };
+
+    const hasCost = costIn > 0 || costOut > 0 || costCache > 0;
+    const formatCost = (label, usage) => {
+      const fmtMoney = n => "$" + Number(n).toFixed(4);
+      const inputCost = (usage.input * costIn) / 1_000_000;
+      const cachedCost = (usage.cached * costCache) / 1_000_000;
+      const outputCost = (usage.output * costOut) / 1_000_000;
+      const totalCost = inputCost + cachedCost + outputCost;
+      const lines = [`${label.cyan.bold}`];
+      lines.push(`  - ${"input".gray}: ${fmtMoney(inputCost).green}`);
+      if (usage.cached) {
+        lines.push(`  - ${"cached".gray}: ${fmtMoney(cachedCost).green}`);
+      }
+      lines.push(`  - ${"output".gray}: ${fmtMoney(outputCost).green}`);
+      lines.push(`  - ${"total".gray}: ${fmtMoney(totalCost).green}`);
+      return lines.join("\n");
+    };
+
     console.log(`📜 History from file: ${historyFile}`.bold);
+
+    if (tokenUsage) {
+      console.log(formatTokenUsage("🔢 Token usage:", tokenUsage));
+      if (hasCost) {
+        console.log(formatCost("💰 Cost:", tokenUsage));
+      }
+    }
 
     history.forEach((message, index) => {
       const timestamp = message.timestamp ? ` ${new Date(message.timestamp).toLocaleString()}` : "";
@@ -160,6 +203,13 @@ export const historyExecutor = async options => {
         });
       }
     });
+
+    if (tokenUsage) {
+      console.log("\n" + formatTokenUsage("🔢 Total token usage:", tokenUsage));
+      if (hasCost) {
+        console.log(formatCost("💰 Total cost:", tokenUsage));
+      }
+    }
   } catch (error) {
     if (error.code === "ENOENT") {
       console.error(`Error: History file '${historyFile}' not found`.red);

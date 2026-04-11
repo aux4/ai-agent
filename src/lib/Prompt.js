@@ -29,6 +29,7 @@ class Prompt {
     this.toolsConfig = toolsConfig;
     this.compactionConfig = options.compaction || null;
     this.messages = [];
+    this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.mcpClient = null;
 
     const Model = getModel(config.type || "openai");
@@ -88,9 +89,21 @@ class Prompt {
     if (!file || file === "") return;
 
     this.historyFile = file;
-    const historyMessages = (await readFile(file).then(asJson())) || [];
-    if (Array.isArray(historyMessages)) {
-      this.messages = this.messages.concat(historyMessages);
+    const historyData = (await readFile(file).then(asJson())) || [];
+    if (Array.isArray(historyData)) {
+      this.messages = this.messages.concat(historyData);
+    } else if (historyData && typeof historyData === "object") {
+      if (Array.isArray(historyData.messages)) {
+        this.messages = this.messages.concat(historyData.messages);
+      }
+      if (historyData.tokenUsage && typeof historyData.tokenUsage === "object") {
+        this.tokenUsage = {
+          input: historyData.tokenUsage.input || 0,
+          output: historyData.tokenUsage.output || 0,
+          cached: historyData.tokenUsage.cached || 0,
+          total: historyData.tokenUsage.total || 0
+        };
+      }
     }
   }
 
@@ -268,6 +281,8 @@ class Prompt {
         response = await chain.invoke();
       }
 
+      this._accumulateTokenUsage(response);
+
       if (response.tool_calls && response.tool_calls.length > 0) {
         this.messages.push({ role: "assistant_with_tool", content: response, timestamp: Date.now() });
         this.saveHistory();
@@ -428,6 +443,30 @@ class Prompt {
     this.callback = callback;
   }
 
+  _accumulateTokenUsage(response) {
+    if (!response) return;
+    const input = response.response_metadata?.tokenUsage?.promptTokens
+      || response.usage_metadata?.input_tokens
+      || 0;
+    const output = response.response_metadata?.tokenUsage?.completionTokens
+      || response.usage_metadata?.output_tokens
+      || 0;
+
+    // Cached input tokens — different providers expose this differently
+    const cached = response.usage_metadata?.input_token_details?.cache_read
+      || response.response_metadata?.usage?.cache_read_input_tokens
+      || response.response_metadata?.usage?.prompt_tokens_details?.cached_tokens
+      || response.response_metadata?.tokenUsage?.promptTokensDetails?.cachedTokens
+      || 0;
+
+    if (input || output || cached) {
+      this.tokenUsage.input += input;
+      this.tokenUsage.output += output;
+      this.tokenUsage.cached += cached;
+      this.tokenUsage.total += (input + output);
+    }
+  }
+
   saveHistory(sync = false) {
     if (!this.historyFile) return;
     try {
@@ -448,7 +487,10 @@ class Prompt {
 
       if (simplifiedMessages.length === 0) return;
 
-      const data = JSON.stringify(simplifiedMessages);
+      const data = JSON.stringify({
+        messages: simplifiedMessages,
+        tokenUsage: this.tokenUsage
+      });
       if (data.length < 3) return;
 
       // Skip writing if file on disk is larger (avoids clobbering from a

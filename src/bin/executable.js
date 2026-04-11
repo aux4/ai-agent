@@ -95,7 +95,10 @@ process.title = "aux4-agent";
       });
     } else if (command === "history") {
       await historyExecutor({
-        historyFile: args[1]
+        historyFile: args[1],
+        costIn: parseFloat(args[2]) || 0,
+        costOut: parseFloat(args[3]) || 0,
+        costCache: parseFloat(args[4]) || 0
       });
     } else if (command === "summarize") {
       await summarizeExecutor({
