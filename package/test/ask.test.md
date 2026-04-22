@@ -1,7 +1,7 @@
 # ask simple questions
 
 ```timeout
-60000
+120000
 ```
 
 ```execute

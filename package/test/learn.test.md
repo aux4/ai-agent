@@ -76,6 +76,10 @@ aux4 ai agent learn france.txt
 
 #### Test France again
 
+```timeout
+30000
+```
+
 ```execute
 aux4 ai agent search "What is the capital of France?"
 ```

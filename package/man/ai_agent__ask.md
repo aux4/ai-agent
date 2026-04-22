@@ -18,10 +18,10 @@ Key features:
 #### Usage
 
 ```bash
-aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] <question>
+aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
 ```
 
---instructions   Prompt instructions file (default: instructions.md)
+--instructions   Prompt instructions file (default: AGENTS.md; falls back to AGENT.md then instructions.md if not found)
 --role           Role used in the prompt (default: user)
 --history        History JSON file for multi-turn conversations (default: "")
 --outputSchema   JSON schema file to constrain structured output (default: schema.json)
@@ -34,6 +34,8 @@ aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--
 --permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
 --models         Models registry as JSON (default: {})
 --useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
+--references     Path to the references directory (default: ${packageDir}/references)
+--skills         Path to the skills directory (default: skills)
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -45,6 +47,8 @@ Compaction config fields:
 - `maxContextPercent` — trigger threshold as percentage (default: 85)
 - `keepLastMessages` — recent messages to keep verbatim (default: 6)
 - `model` — optional model config for summarization (defaults to main model)
+
+**Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand using the `readSkill` tool. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
 
 #### Example
 

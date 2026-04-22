@@ -22,6 +22,8 @@ import searchFilesDesc from "../docs/tools/searchFiles.md?raw";
 import askUserDesc from "../docs/tools/askUser.md?raw";
 import currentDateTimeDesc from "../docs/tools/currentDateTime.md?raw";
 import readReferenceDesc from "../docs/tools/readReference.md?raw";
+import readSkillDesc from "../docs/tools/readSkill.md?raw";
+import { listSkills } from "./Skills.js";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
@@ -1264,6 +1266,43 @@ export const createReadReferenceTool = (referencesDir) => tool(
   }
 );
 
+export const createReadSkillTool = (skillsDir) => tool(
+  async ({ skill }) => {
+    try {
+      if (!skillsDir) {
+        return "No skills directory configured.";
+      }
+
+      const resolvedDir = path.resolve(skillsDir);
+
+      if (!fs.existsSync(resolvedDir)) {
+        return "Skills directory not found.";
+      }
+
+      if (!skill) {
+        const skills = listSkills(skillsDir);
+        if (skills.length === 0) return "No skills found.";
+        return skills.map(s => `- **${s.name}**: ${s.description}`).join("\n");
+      }
+
+      const skillPath = path.resolve(resolvedDir, skill, "SKILL.md");
+      if (!skillPath.startsWith(resolvedDir)) return "Access denied";
+      if (!fs.existsSync(skillPath)) return `Skill "${skill}" not found.`;
+
+      return fs.readFileSync(skillPath, { encoding: "utf-8" });
+    } catch (e) {
+      return e.message;
+    }
+  },
+  {
+    name: "readSkill",
+    description: readSkillDesc,
+    schema: z.object({
+      skill: z.string().optional().describe("The skill name to read. Omit to list available skills.")
+    })
+  }
+);
+
 export const createAskUserTool = () => tool(
   async ({ question }) => {
     if (!process.stdin.isTTY) {
@@ -1381,7 +1420,7 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
 export const searchContextTool = createSearchContextTool();
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions, references } = config;
+  const { storage, embeddingsConfig, permissions, references, skills } = config;
 
   return {
     readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
@@ -1396,7 +1435,8 @@ export function createTools(config = {}) {
     searchContext: createSearchContextTool(storage, embeddingsConfig),
     askUser: createAskUserTool(),
     currentDateTime: currentDateTimeTool,
-    readReference: createReadReferenceTool(references)
+    readReference: createReadReferenceTool(references),
+    readSkill: createReadSkillTool(skills)
   };
 }
 
@@ -1413,7 +1453,8 @@ const Tools = {
   searchContext: searchContextTool,
   askUser: askUserTool,
   currentDateTime: currentDateTimeTool,
-  readReference: createReadReferenceTool()
+  readReference: createReadReferenceTool(),
+  readSkill: createReadSkillTool()
 };
 
 export default Tools;

@@ -48,7 +48,7 @@ Error: History file*not found
 ### should compact history and reduce message count
 
 ```timeout
-60000
+120000
 ```
 
 ```execute

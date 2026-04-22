@@ -52,7 +52,7 @@ Overview:
 Ask a single question to the agent. The agent composes the prompt using an instructions file, optional context, optional images, and retrieves relevant documents from the local vector store when available.
 
 Key variables (from the package help):
-- instructions (default: instructions.md) — prompt instructions file to shape the assistant.
+- instructions (default: AGENTS.md) — prompt instructions file to shape the assistant. Falls back to AGENT.md then instructions.md if not found.
 - role (default: user) — role used in the prompt.
 - history (default: "") — a history file to seed the conversation.
 - outputSchema (default: schema.json) — path to a JSON file defining the structured output format (see [Output Schema](#output-schema)).
@@ -64,6 +64,7 @@ Key variables (from the package help):
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
+- skills (default: "skills") — path to the skills directory (see [Skills](#skills)).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples (from tests):
@@ -91,7 +92,7 @@ aux4 ai agent ask --config --stream true --question "Explain what AI agents are 
 ```
 
 Notes:
-- Use --config when you want the agent to use the configured instructions file (instructions.md) as in the tests.
+- Use --config when you want the agent to use the configured instructions file (AGENTS.md) as in the tests.
 - The question can be provided via the --question flag or as a final positional argument.
 - Provide multiple image paths separated by commas if needed.
 - Use `--stream true` for real-time token output — useful for long responses or interactive workflows.
@@ -103,7 +104,7 @@ Overview:
 An interactive chat loop that sets question text, logs the user input, then delegates to the ask flow repeatedly. The chat command uses the same prompt instructions, history and image options but is designed to loop until you type exit.
 
 Key variables:
-- instructions (default: instructions.md)
+- instructions (default: AGENTS.md)
 - role (default: user)
 - history (default: history.json)
 - outputSchema (default: schema.json)
@@ -415,6 +416,7 @@ The agent comes with a set of built-in tools that the LLM can call during execut
 | `askUser` | Ask the user a question and wait for their typed response |
 | `currentDateTime` | Get the current date and time in local and UTC formats |
 | `readReference` | List or read reference documents from the references directory |
+| `readSkill` | List or read skill definitions from the skills directory |
 
 ### askUser
 
@@ -443,11 +445,20 @@ The tool searches the references directory recursively, so nested folders are su
 
 By default, the references directory is `${packageDir}/references` — any agent package can ship reference documents by placing `.md` files there. Override with `--references <path>` to use a custom directory.
 
+### readSkill
+
+The `readSkill` tool gives the agent on-demand access to skill instructions from the skills directory. Skills are discovered at startup and their names and descriptions are injected into the system prompt. The agent reads full skill content only when needed.
+
+- **List skills:** Call with no `skill` parameter to get a list of available skills with descriptions.
+- **Read a skill:** Call with a `skill` parameter (e.g., `code-review`) to read the full `SKILL.md` content.
+
+By default, the skills directory is `skills` relative to the working directory. Override with `--skills <path>`.
+
 ---
 
 ## References
 
-Reference documents let you provide detailed knowledge to the agent without bloating the system prompt. Instead of putting everything in `instructions.md`, place detailed documents in a `references/` directory and the agent will look them up on demand using the `readReference` tool.
+Reference documents let you provide detailed knowledge to the agent without bloating the system prompt. Instead of putting everything in `AGENTS.md`, place detailed documents in a `references/` directory and the agent will look them up on demand using the `readReference` tool.
 
 ### Setup
 
@@ -470,7 +481,7 @@ Nested folders are supported — the agent sees them as relative paths like `gui
 
 ### Usage
 
-Mention the references in your `instructions.md` so the agent knows to look them up:
+Mention the references in your `AGENTS.md` so the agent knows to look them up:
 
 ```markdown
 You are a project assistant. When the user asks about the API or database,
@@ -485,6 +496,69 @@ Override the default path with `--references`:
 
 ```bash
 aux4 ai agent ask "How do I deploy?" --references ./docs/references
+```
+
+---
+
+## Skills
+
+Skills let you provide on-demand capability instructions to the agent using a folder-based convention compatible with Claude Code, Cursor, and the Open Agent Skills specification. Instead of putting everything in `AGENTS.md`, place detailed skill instructions in a `skills/` directory and the agent will discover them at startup and read their full content on demand using the `readSkill` tool.
+
+### Folder Structure
+
+Each skill is a subdirectory containing a `SKILL.md` file with YAML frontmatter:
+
+```
+my-agent/
+├── AGENTS.md
+├── skills/
+│   ├── code-review/
+│   │   └── SKILL.md
+│   ├── deploy/
+│   │   └── SKILL.md
+│   └── web-search/
+│       └── SKILL.md
+└── config.yaml
+```
+
+### SKILL.md Format
+
+```yaml
+---
+name: code-review
+description: Review code for bugs, style issues, and security vulnerabilities
+---
+
+# Code Review
+
+Instructions for the agent on how to perform code reviews...
+```
+
+The frontmatter fields:
+- `name` — skill identifier (lowercase, hyphens allowed)
+- `description` — one-line description used for discovery
+
+### How It Works
+
+1. **Discovery:** At startup, the agent scans `skills/*/SKILL.md` and extracts the `name` and `description` from each file's YAML frontmatter. This catalog is injected as a system message so the agent knows what skills are available.
+2. **On-demand loading:** When the agent needs a skill's full instructions, it calls the `readSkill` tool with the skill name. This progressive disclosure pattern keeps the system prompt small.
+3. **Listing:** The agent can call `readSkill` with no parameters to list all available skills.
+
+### Usage
+
+Reference skills in your `AGENTS.md` so the agent knows to use them:
+
+```markdown
+You are a development assistant. Use the readSkill tool to read available
+skills when the user asks you to perform a task that matches a skill.
+```
+
+### Custom Skills Path
+
+Override the default path with `--skills`:
+
+```bash
+aux4 ai agent ask "Review my code" --skills ./my-skills
 ```
 
 ---
@@ -808,7 +882,7 @@ aux4 ai agent history
 The history includes the executeAux4 invocation and the tool outputs.
 
 ### Example 4 — Contextual structured outputs (search + JSON)
-The tests include context-driven examples where the agent is configured with instructions and asked to return strict JSON based on search results. Use instructions.md and schema.json to constrain responses and call ask with --config to apply them:
+The tests include context-driven examples where the agent is configured with instructions and asked to return strict JSON based on search results. Use AGENTS.md and schema.json to constrain responses and call ask with --config to apply them:
 
 ```bash
 aux4 ai agent ask "What is the role and company of John Doe?" --config

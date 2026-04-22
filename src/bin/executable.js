@@ -81,6 +81,7 @@ process.title = "aux4-agent";
         models: JSON.parse(args[16] || "{}"),
         useModel: args[17] || "",
         references: args[18] || "",
+        skills: args[19] || "",
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {

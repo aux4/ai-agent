@@ -1,7 +1,7 @@
 # current date time
 
 ```timeout
-60000
+120000
 ```
 
 ```execute

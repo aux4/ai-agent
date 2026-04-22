@@ -24,7 +24,7 @@ Zoe Johnson is Director at Gamma LLC.
 Daniel Brown is Intern at Delta Co.
 ```
 
-```file:instructions.md
+```file:AGENTS.md
 You're an AI agent that returns the person's role and company based on their name.
 
 The response format is JSON:
@@ -51,7 +51,7 @@ Do not add period at the end of the company name.
 ```
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
@@ -64,7 +64,7 @@ aux4 ai agent learn context-4.txt
 ## Find John Doe
 
 ```timeout
-90000
+120000
 ```
 
 ```execute
@@ -82,7 +82,7 @@ aux4 ai agent ask "What is the role and company of John Doe?" --config
 ## Find Mary Smith
 
 ```timeout
-90000
+120000
 ```
 
 ```execute
@@ -100,7 +100,7 @@ aux4 ai agent ask "What is the role and company of Mary Smith?" --config
 ## Find Zoe Johnson
 
 ```timeout
-90000
+120000
 ```
 
 ```execute

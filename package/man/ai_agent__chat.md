@@ -7,10 +7,10 @@ The chat command supports all the same features as the ask command (instructions
 #### Usage
 
 ```bash
-aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] <text>
+aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <text>
 ```
 
---instructions   Prompt instructions file (default: instructions.md)
+--instructions   Prompt instructions file (default: AGENTS.md; falls back to AGENT.md then instructions.md if not found)
 --role           Role used in the prompt (default: user)
 --history        History JSON file (default: history.json)
 --outputSchema   JSON schema file for structured output (default: schema.json)
@@ -23,6 +23,8 @@ aux4 ai agent chat [--instructions <file>] [--role <role>] [--history <file>] [-
 --permissions    Permissions config as JSON with allow, ask, deny arrays (default: {})
 --models         Models registry as JSON (default: {})
 --useModel       Named model from registry to use for this request (default: "")
+--references     Path to the references directory (default: ${packageDir}/references)
+--skills         Path to the skills directory (default: skills)
 text             Initial text to send (positional argument)
 
 #### Example

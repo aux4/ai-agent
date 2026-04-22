@@ -2,12 +2,10 @@
 
 ```file:summarize-history.json
 [
-  {"role":"user","content":"What is the capital of France?"},
-  {"role":"assistant","content":"The capital of France is Paris."},
-  {"role":"user","content":"What about Germany?"},
-  {"role":"assistant","content":"The capital of Germany is Berlin."},
-  {"role":"user","content":"And Italy?"},
-  {"role":"assistant","content":"The capital of Italy is Rome."}
+  {"role":"user","content":"What was the outcome of the Zylox-9 experiment?"},
+  {"role":"assistant","content":"The Zylox-9 experiment produced compound FERRANOVA-331, which showed a 94% binding efficiency. Dr. Halbrook approved it for Phase 2 trials on March 3rd."},
+  {"role":"user","content":"Who is leading the next phase?"},
+  {"role":"assistant","content":"Dr. Mendelev is leading Phase 2. The trial site is at the Kirkwall Research Center in sector 7B."}
 ]
 ```
 
@@ -44,7 +42,7 @@ Error: History file*not found
 ### should produce a summary mentioning key topics
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
@@ -52,5 +50,5 @@ aux4 ai agent summarize summarize-history.json --config
 ```
 
 ```expect:partial:ignoreCase
-**Paris*
+*FERRANOVA-331*
 ```

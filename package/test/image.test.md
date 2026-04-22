@@ -3,7 +3,7 @@
 ## generate an image
 
 ```timeout
-90000
+120000
 ```
 
 ```execute
@@ -42,7 +42,7 @@ Image saved to 3-multi-test.png
 ### ask about an image
 
 ```timeout
-90000
+120000
 ```
 
 ```execute

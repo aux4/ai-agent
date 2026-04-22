@@ -1,8 +1,10 @@
+import fs from "node:fs";
 import path from "path";
 import Prompt, { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
+import { loadSkillsCatalog } from "../../lib/Skills.js";
 
 export async function askExecutor(params) {
   try {
@@ -25,6 +27,17 @@ export async function askExecutor(params) {
     const bio = params.bio;
     const permissions = params.permissions;
     const references = params.references || (params.packageDir ? path.join(params.packageDir, "references") : "");
+    const skills = params.skills || "skills";
+
+    // AGENTS.md fallback: try AGENTS.md → AGENT.md → instructions.md
+    let instructionsFile = instructions;
+    if (instructionsFile === "AGENTS.md" && !fs.existsSync("AGENTS.md")) {
+      if (fs.existsSync("AGENT.md")) {
+        instructionsFile = "AGENT.md";
+      } else if (fs.existsSync("instructions.md")) {
+        instructionsFile = "instructions.md";
+      }
+    }
 
     let contextContent;
     if (context === true || context === "true") {
@@ -44,6 +57,9 @@ export async function askExecutor(params) {
     if (references) {
       toolsConfig.references = references;
     }
+    if (skills) {
+      toolsConfig.skills = skills;
+    }
 
     const prompt = new Prompt(model, toolsConfig, { compaction });
     await prompt.init();
@@ -61,9 +77,15 @@ export async function askExecutor(params) {
     if (baseInstructions) {
       await prompt.instructions(await readFile(baseInstructions), params);
     }
-    if (instructions) {
-      await prompt.instructions(await readFile(instructions), params);
+    if (instructionsFile) {
+      await prompt.instructions(await readFile(instructionsFile), params);
     }
+
+    const skillsCatalog = loadSkillsCatalog(skills);
+    if (skillsCatalog) {
+      await prompt.instructions(skillsCatalog);
+    }
+
     await prompt.instructions("If you need to ask the user a question or need clarification, use the askUser tool. Always call askUser alone, never in parallel with other tools.");
 
     await prompt.history(history);

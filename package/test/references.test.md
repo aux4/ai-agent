@@ -1,51 +1,55 @@
 # references
 
 ```beforeAll
-mkdir -p references/colors
-echo "# Planets\n\n- Mercury is the closest planet to the Sun.\n- Venus is the hottest planet.\n- Earth is the only planet known to support life.\n- Mars is known as the Red Planet." > references/planets.md
-echo "# Primary Colors\n\nThe three primary colors are red, blue, and yellow." > references/colors/primary.md
+mkdir -p references
 ```
 
 ```afterAll
 rm -rf references
 ```
 
-```file:instructions.md
-You are a helpful assistant. When asked about planets or colors, use the readReference tool to look up the information. Just output the answer, nothing else.
+```file:references/projects.md
+# Project Codenames
+
+- Project Alpha codename: ZEPHYR-8841
+- Project Beta codename: TRIDENT-5023
+- Project Gamma codename: OBSIDIAN-7796
+```
+
+```file:references/mascots.md
+# Team Mascots
+
+The engineering team mascot is MAPLE-THUNDER-42.
+```
+
+```file:AGENTS.md
+You are a helpful assistant. When asked about projects or mascots, use the readReference tool to look up the information. Just output the answer, nothing else.
 ```
 
 ## read a reference
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
-aux4 ai agent ask --config --references references --question "Which planet is the hottest? Just output the planet name, nothing else."
+aux4 ai agent ask --config --references references --question "What is the codename for Project Beta? Just output the codename, nothing else."
 ```
 
 ```expect:partial
-Venus
+TRIDENT-5023
 ```
 
-## read nested reference
+## read another reference
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
-aux4 ai agent ask --config --references references --question "What are the three primary colors? Just output the three color names separated by commas, nothing else."
+aux4 ai agent ask --config --references references --question "What is the engineering team mascot? Just output the mascot name, nothing else."
 ```
 
 ```expect:partial
-red
-```
-
-```expect:partial
-blue
-```
-
-```expect:partial
-yellow
+MAPLE-THUNDER-42
 ```

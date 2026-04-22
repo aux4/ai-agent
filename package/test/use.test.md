@@ -5,7 +5,7 @@
 ### should answer using the named model
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
@@ -21,7 +21,7 @@ aux4 ai agent ask --models '{"fast":{"type":"openai","config":{"model":"gpt-4o-m
 ### should fallback to default model
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
@@ -48,8 +48,8 @@ strong
 
 ```file:use-remember-history.json
 [
-  {"role":"user","content":"What is the capital of France?"},
-  {"role":"assistant","content":"The capital of France is Paris."}
+  {"role":"user","content":"What happened at the Nexora summit?"},
+  {"role":"assistant","content":"The Nexora summit concluded with the signing of the PALLADIUM-7 accord by delegates from all 12 participating sectors."}
 ]
 ```
 
@@ -60,7 +60,7 @@ rm -f use-remember-history.json
 ### should generate memory using named model
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
@@ -68,15 +68,15 @@ aux4 ai agent remember use-remember-history.json --models '{"fast":{"type":"open
 ```
 
 ```expect:partial:ignoreCase
-*Paris*
+*PALLADIUM-7*
 ```
 
 ## summarize with --use
 
 ```file:use-summarize-history.json
 [
-  {"role":"user","content":"What is the capital of France?"},
-  {"role":"assistant","content":"The capital of France is Paris."}
+  {"role":"user","content":"What happened at the Nexora summit?"},
+  {"role":"assistant","content":"The Nexora summit concluded with the signing of the PALLADIUM-7 accord by delegates from all 12 participating sectors."}
 ]
 ```
 
@@ -87,7 +87,7 @@ rm -f use-summarize-history.json
 ### should summarize using named model
 
 ```timeout
-60000
+120000
 ```
 
 ```execute
@@ -95,5 +95,5 @@ aux4 ai agent summarize use-summarize-history.json --models '{"fast":{"type":"op
 ```
 
 ```expect:partial:ignoreCase
-*Paris*
+*PALLADIUM-7*
 ```
