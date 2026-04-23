@@ -50,6 +50,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Clean build artifacts
+        run: git checkout .
+
       - name: Publish package
         uses: aux4/publish-package-action@v1
         with:
