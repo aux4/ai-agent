@@ -14,7 +14,7 @@ Key features:
 - **askUser tool** — when the agent needs clarification it can prompt the user interactively; in non-interactive sessions it proceeds with best judgment
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
-- **Responses API** — set `api: responses` in the model config to use OpenAI's Responses API instead of Chat Completions
+- **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
 
 #### Usage
 
@@ -103,8 +103,8 @@ With a named model from registry:
 aux4 ai agent ask --configFile config.yaml --config agent --useModel fast "What is 2+2?"
 ```
 
-With OpenAI Responses API:
+With Codex (ChatGPT subscription, no API key needed):
 
 ```bash
-aux4 ai agent ask --model '{"type":"openai","api":"responses","config":{"model":"gpt-4o"}}' "What time is it?"
+aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "What time is it?"
 ```

@@ -10,7 +10,8 @@ import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
-import { ResponsesApi } from "./ResponsesApi.js";
+import { CodexApi } from "./CodexApi.js";
+import { loadCodexAuth } from "./TokenRefresh.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -34,11 +35,19 @@ class Prompt {
     this.mcpClient = null;
     this.apiType = config.api || "chat";
 
-    if (this.apiType === "responses") {
-      this.responsesApi = new ResponsesApi(config.config);
+    if (this.apiType === "codex") {
+      const codexAuth = loadCodexAuth();
+      if (!codexAuth) {
+        throw new PromptError("Codex auth not found. Run 'codex login' first.");
+      }
+      this.codexApi = new CodexApi({ ...(config.config || {}), ...codexAuth });
     } else {
       const Model = getModel(config.type || "openai");
-      this.model = new Model(config.config);
+      const chatConfig = config.config || {};
+      if (!chatConfig.model && (config.type || "openai") === "openai") {
+        chatConfig.model = "gpt-5-mini";
+      }
+      this.model = new Model(chatConfig);
     }
   }
 
@@ -59,10 +68,10 @@ class Prompt {
       }
     }
 
-    if (this.apiType === "responses") {
-      this.responsesApi.bindTools(Object.values(configuredTools));
+    if (this.apiType === "codex") {
+      this.codexApi.bindTools(Object.values(configuredTools));
       if (mcpTools.length > 0) {
-        this.responsesApi.bindTools(mcpTools);
+        this.codexApi.bindTools(mcpTools);
       }
       this.tools = {
         ...configuredTools,
@@ -190,8 +199,8 @@ class Prompt {
       throw new Error(`Messages is not an array: ${typeof this.messages}`);
     }
 
-    if (this.apiType === "responses") {
-      return await this._executeResponses();
+    if (this.apiType === "codex") {
+      return await this._executeCodex();
     }
 
     let messages = this.messages;
@@ -278,9 +287,6 @@ class Prompt {
     );
 
     let chain = promptTemplate.pipe(this.model);
-
-
-
 
     try {
       let response;
@@ -449,9 +455,9 @@ class Prompt {
     return accumulated;
   }
 
-  async _executeResponses() {
+  async _executeCodex() {
     try {
-      const result = await this.responsesApi.execute(this.messages, {
+      const result = await this.codexApi.execute(this.messages, {
         streaming: this.streaming && !this.outputSchema,
         tokenCallback: this.tokenCallback,
         outputSchema: this.outputSchema

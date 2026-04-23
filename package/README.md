@@ -397,9 +397,17 @@ For more details see [aux4 ai agent models](./commands/ai/agent/models).
 
 ---
 
-## Responses API
+## Codex
 
-By default, the agent uses OpenAI's Chat Completions API via LangChain. You can switch to OpenAI's [Responses API](https://platform.openai.com/docs/guides/responses-vs-chat-completions) by setting `api: responses` in the model configuration.
+Use OpenAI models with your ChatGPT subscription instead of an API key. Set `api: codex` in the model config to use the Codex endpoint with OAuth tokens from `~/.codex/auth.json`.
+
+### Prerequisites
+
+Login with the Codex CLI once:
+
+```bash
+npx @openai/codex login
+```
 
 ### Configuration
 
@@ -407,53 +415,24 @@ By default, the agent uses OpenAI's Chat Completions API via LangChain. You can 
 config:
   agent:
     model:
-      type: openai
-      api: responses    # default: chat
+      api: codex
       config:
-        model: gpt-4o
+        model: gpt-5.3-codex
 ```
 
 Or inline:
 
 ```bash
-aux4 ai agent ask --model '{"type":"openai","api":"responses","config":{"model":"gpt-4o"}}' "What time is it?"
-```
-
-### Named models
-
-The `api` field works with named models too:
-
-```yaml
-config:
-  agent:
-    models:
-      responses:
-        type: openai
-        api: responses
-        config:
-          model: gpt-4o
-        description: "OpenAI Responses API"
-      chat:
-        type: openai
-        config:
-          model: gpt-4o
-        description: "OpenAI Chat Completions API"
-    model:
-      type: openai
-      config:
-        model: gpt-4o
-```
-
-```bash
-aux4 ai agent ask --configFile config.yaml --config agent --useModel responses "What time is it?"
+aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "What time is it?"
 ```
 
 ### How it works
 
-- When `api: responses`, the agent uses the OpenAI SDK directly (`client.responses.create()`) instead of LangChain
-- All built-in tools (readFile, writeFile, executeAux4, readSkill, etc.) work the same way — tools execute locally with the same permissions
-- Streaming, history, compaction, and output schemas are fully supported
-- The `api` field only applies to `type: openai` — other providers (Anthropic, Bedrock, Gemini, etc.) always use the Chat Completions path via LangChain
+- Reads OAuth tokens from `~/.codex/auth.json` (created by `codex login`)
+- Refreshes the access token before each API call (tokens are short-lived)
+- Calls `chatgpt.com/backend-api/codex/responses` instead of `api.openai.com`
+- All built-in tools, streaming, history, compaction, and skills work the same way
+- Persists refreshed tokens back to `~/.codex/auth.json` for other tools to use
 
 ---
 
