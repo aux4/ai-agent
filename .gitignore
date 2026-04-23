@@ -70,4 +70,5 @@ local-test
 # Only ignore the built file and node_modules in package/lib
 package/lib/aux4-ai-agent.cjs
 package/lib/node_modules/
+package/lib/package-lock.json
 *.zip
