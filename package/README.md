@@ -64,7 +64,7 @@ Key variables (from the package help):
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
-- skills (default: "skills") — path to the skills directory (see [Skills](#skills)).
+- skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples (from tests):
@@ -491,7 +491,7 @@ The `readSkill` tool gives the agent on-demand access to skill instructions from
 - **List skills:** Call with no `skill` parameter to get a list of available skills with descriptions.
 - **Read a skill:** Call with a `skill` parameter (e.g., `code-review`) to read the full `SKILL.md` content.
 
-By default, the skills directory is `skills` relative to the working directory. Override with `--skills <path>`.
+By default, the skills directory is `.agents/skills` relative to the working directory. Override with `--skills <path>`.
 
 ---
 
@@ -541,7 +541,7 @@ aux4 ai agent ask "How do I deploy?" --references ./docs/references
 
 ## Skills
 
-Skills let you provide on-demand capability instructions to the agent using a folder-based convention compatible with Claude Code, Cursor, and the Open Agent Skills specification. Instead of putting everything in `AGENTS.md`, place detailed skill instructions in a `skills/` directory and the agent will discover them at startup and read their full content on demand using the `readSkill` tool.
+Skills let you provide on-demand capability instructions to the agent using a folder-based convention compatible with Claude Code, Cursor, and the Open Agent Skills specification. Instead of putting everything in `AGENTS.md`, place detailed skill instructions in an `.agents/skills/` directory and the agent will discover them at startup and read their full content on demand using the `readSkill` tool.
 
 ### Folder Structure
 
@@ -550,13 +550,14 @@ Each skill is a subdirectory containing a `SKILL.md` file with YAML frontmatter:
 ```
 my-agent/
 ├── AGENTS.md
-├── skills/
-│   ├── code-review/
-│   │   └── SKILL.md
-│   ├── deploy/
-│   │   └── SKILL.md
-│   └── web-search/
-│       └── SKILL.md
+├── .agents/
+│   └── skills/
+│       ├── code-review/
+│       │   └── SKILL.md
+│       ├── deploy/
+│       │   └── SKILL.md
+│       └── web-search/
+│           └── SKILL.md
 └── config.yaml
 ```
 
@@ -579,7 +580,7 @@ The frontmatter fields:
 
 ### How It Works
 
-1. **Discovery:** At startup, the agent scans `skills/*/SKILL.md` and extracts the `name` and `description` from each file's YAML frontmatter. This catalog is injected as a system message so the agent knows what skills are available.
+1. **Discovery:** At startup, the agent scans `.agents/skills/*/SKILL.md` and extracts the `name` and `description` from each file's YAML frontmatter. This catalog is injected as a system message so the agent knows what skills are available.
 2. **On-demand loading:** When the agent needs a skill's full instructions, it calls the `readSkill` tool with the skill name. This progressive disclosure pattern keeps the system prompt small.
 3. **Listing:** The agent can call `readSkill` with no parameters to list all available skills.
 

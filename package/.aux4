@@ -219,7 +219,7 @@
               {
                 "name": "skills",
                 "text": "Path to the skills directory",
-                "default": "skills"
+                "default": ".agents/skills"
               },
               {
                 "name": "question",
@@ -371,7 +371,7 @@
               {
                 "name": "skills",
                 "text": "Path to the skills directory",
-                "default": "skills"
+                "default": ".agents/skills"
               },
               {
                 "name": "text",
