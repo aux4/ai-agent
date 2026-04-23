@@ -4,7 +4,7 @@ export function resolveModel(modelOrName, registry = {}) {
 
   const entry = registry[modelOrName];
   if (!entry) return null;
-  return { type: entry.type, config: entry.config };
+  return { type: entry.type, config: entry.config, ...(entry.api ? { api: entry.api } : {}) };
 }
 
 export function resolveFromConfig(config, useName) {

@@ -10,6 +10,7 @@ import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
+import { ResponsesApi } from "./ResponsesApi.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -31,9 +32,14 @@ class Prompt {
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.mcpClient = null;
+    this.apiType = config.api || "chat";
 
-    const Model = getModel(config.type || "openai");
-    this.model = new Model(config.config);
+    if (this.apiType === "responses") {
+      this.responsesApi = new ResponsesApi(config.config);
+    } else {
+      const Model = getModel(config.type || "openai");
+      this.model = new Model(config.config);
+    }
   }
 
   async init() {
@@ -41,34 +47,34 @@ class Prompt {
     const configuredTools = Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools;
 
     const mcpConfigPath = path.join(process.cwd(), "mcp.json");
-    if (!fs.existsSync(mcpConfigPath)) {
-      this.model = this.model.bindTools(Object.values(configuredTools));
-      this.tools = configuredTools;
-      return;
+    let mcpTools = [];
+
+    if (fs.existsSync(mcpConfigPath)) {
+      try {
+        const mcpConfig = JSON.parse(fs.readFileSync(mcpConfigPath, "utf-8"));
+        this.mcpClient = new MultiServerMCPClient({ ...mcpConfig });
+        mcpTools = await this.mcpClient.getTools();
+      } catch (e) {
+        console.error("Error reading mcp.json:", e.message);
+      }
     }
 
-    try {
-      const mcpConfig = JSON.parse(fs.readFileSync(mcpConfigPath, "utf-8"));
-
-      this.mcpClient = new MultiServerMCPClient({
-        ...mcpConfig
-      });
-
-      const mcpTools = await this.mcpClient.getTools();
-      const allTools = [...Object.values(configuredTools), ...mcpTools];
-      this.model = this.model.bindTools(allTools);
-
+    if (this.apiType === "responses") {
+      this.responsesApi.bindTools(Object.values(configuredTools));
+      if (mcpTools.length > 0) {
+        this.responsesApi.bindTools(mcpTools);
+      }
       this.tools = {
         ...configuredTools,
-        ...mcpTools.reduce((acc, tool) => {
-          acc[tool.name] = tool;
-          return acc;
-        }, {})
+        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
       };
-    } catch (e) {
-      console.error("Error reading mcp.json:", e.message);
-      this.model = this.model.bindTools(Object.values(configuredTools));
-      this.tools = configuredTools;
+    } else {
+      const allTools = [...Object.values(configuredTools), ...mcpTools];
+      this.model = this.model.bindTools(allTools);
+      this.tools = {
+        ...configuredTools,
+        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
+      };
     }
   }
 
@@ -182,6 +188,10 @@ class Prompt {
   async execute() {
     if (!Array.isArray(this.messages)) {
       throw new Error(`Messages is not an array: ${typeof this.messages}`);
+    }
+
+    if (this.apiType === "responses") {
+      return await this._executeResponses();
     }
 
     let messages = this.messages;
@@ -437,6 +447,57 @@ class Prompt {
     }
 
     return accumulated;
+  }
+
+  async _executeResponses() {
+    try {
+      const result = await this.responsesApi.execute(this.messages, {
+        streaming: this.streaming && !this.outputSchema,
+        tokenCallback: this.tokenCallback,
+        outputSchema: this.outputSchema
+      });
+
+      this.tokenUsage.input += result.usage.input || 0;
+      this.tokenUsage.output += result.usage.output || 0;
+      this.tokenUsage.cached += result.usage.cached || 0;
+      this.tokenUsage.total += (result.usage.input || 0) + (result.usage.output || 0);
+
+      let answer = result.answer;
+
+      if (this.outputSchema) {
+        let jsonStr = answer.trim();
+        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+        if (codeBlockMatch) {
+          jsonStr = codeBlockMatch[1].trim();
+        }
+        const zodSchema = buildZodSchema(this.outputSchema);
+        const parsed = zodSchema.parse(JSON.parse(jsonStr));
+        answer = JSON.stringify(parsed);
+      }
+
+      this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
+
+      if (this.compactionConfig && this.compactionConfig.contextWindow) {
+        const promptTokens = result.usage.input || 0;
+        if (shouldCompact(promptTokens, this.compactionConfig)) {
+          const compactionModel = this.compactionConfig.model || this.config;
+          try {
+            this.messages = await compactMessages(this.messages, compactionModel, {
+              keepLastMessages: this.compactionConfig.keepLastMessages || 6
+            });
+            this.compacted = true;
+          } catch (err) {
+            console.error(`[compact] Warning: ${err.message}`);
+          }
+        }
+      }
+
+      this.saveHistory(true);
+      return answer;
+    } catch (e) {
+      this.saveHistory(true);
+      throw new PromptError(e.message, e);
+    }
   }
 
   onMessage(callback) {

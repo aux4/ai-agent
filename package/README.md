@@ -397,6 +397,66 @@ For more details see [aux4 ai agent models](./commands/ai/agent/models).
 
 ---
 
+## Responses API
+
+By default, the agent uses OpenAI's Chat Completions API via LangChain. You can switch to OpenAI's [Responses API](https://platform.openai.com/docs/guides/responses-vs-chat-completions) by setting `api: responses` in the model configuration.
+
+### Configuration
+
+```yaml
+config:
+  agent:
+    model:
+      type: openai
+      api: responses    # default: chat
+      config:
+        model: gpt-4o
+```
+
+Or inline:
+
+```bash
+aux4 ai agent ask --model '{"type":"openai","api":"responses","config":{"model":"gpt-4o"}}' "What time is it?"
+```
+
+### Named models
+
+The `api` field works with named models too:
+
+```yaml
+config:
+  agent:
+    models:
+      responses:
+        type: openai
+        api: responses
+        config:
+          model: gpt-4o
+        description: "OpenAI Responses API"
+      chat:
+        type: openai
+        config:
+          model: gpt-4o
+        description: "OpenAI Chat Completions API"
+    model:
+      type: openai
+      config:
+        model: gpt-4o
+```
+
+```bash
+aux4 ai agent ask --configFile config.yaml --config agent --useModel responses "What time is it?"
+```
+
+### How it works
+
+- When `api: responses`, the agent uses the OpenAI SDK directly (`client.responses.create()`) instead of LangChain
+- All built-in tools (readFile, writeFile, executeAux4, readSkill, etc.) work the same way — tools execute locally with the same permissions
+- Streaming, history, compaction, and output schemas are fully supported
+- The `api` field only applies to `type: openai` — other providers (Anthropic, Bedrock, Gemini, etc.) always use the Chat Completions path via LangChain
+
+---
+
 ## Built-in Tools
 
 The agent comes with a set of built-in tools that the LLM can call during execution. These tools run locally and are always available:
