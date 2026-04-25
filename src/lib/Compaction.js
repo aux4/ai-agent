@@ -1,18 +1,52 @@
+import fs from "node:fs";
+import path from "node:path";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { getModel } from "./Models.js";
 
-const SUMMARIZATION_PROMPT = `You are a conversation summarizer. Your job is to create a concise but comprehensive summary of the conversation history provided below. Output the summary in markdown format.
+const DEFAULT_SUMMARIZATION_PROMPT = `You are a conversation compactor. Produce a structured summary of the conversation so the agent can resume work without losing context.
 
-Preserve the following in your summary:
-- Key facts, data points, and numbers mentioned
-- Decisions made and their reasoning
-- Important context about the user's goals and preferences
-- Tool calls made and their significant results
-- Any constraints, requirements, or preferences expressed by the user
-- The current state of any ongoing tasks
+Use EXACTLY this format:
 
-Be concise but do not omit important details.`;
+## Goal
+What the user asked for (one sentence).
+
+## Constraints & Preferences
+Any requirements, preferences, or boundaries the user specified. Omit if none.
+
+## Progress
+### Done
+- [completed item] — brief outcome
+### In Progress
+- [current item] — what's been started but not finished
+### Blocked
+- [blocked item] — what's waiting and why
+
+## Key Decisions
+- [decision] — why it was chosen (one line each)
+
+## Next Steps
+What should happen next, in order.
+
+## Critical Context
+Any important facts, numbers, or context that would be lost without this summary. Omit if nothing critical.
+
+Rules:
+- Be concise — one line per item
+- Preserve ALL task/todo names exactly (the agent uses them to resume)
+- Preserve ALL file paths exactly (the agent needs them to avoid re-reading)
+- If a previous compaction summary exists in the conversation, merge its content into yours — don't lose accumulated context
+- Never fabricate information not in the conversation`;
+
+function loadSummarizationPrompt(promptFile) {
+  if (promptFile) {
+    const resolved = path.resolve(promptFile);
+    if (fs.existsSync(resolved)) {
+      return fs.readFileSync(resolved, "utf-8");
+    }
+  }
+  return DEFAULT_SUMMARIZATION_PROMPT;
+}
 
 const MEMORY_PROMPT = `You are a session memory recorder. Distill the conversation below into a short memory entry for future reference. Output markdown.
 
@@ -57,14 +91,15 @@ export function shouldCompact(promptTokens, compactionConfig) {
   return promptTokens >= threshold;
 }
 
-export async function summarizeMessages(messages, modelConfig) {
+export async function summarizeMessages(messages, modelConfig, options = {}) {
   const formattedText = formatMessagesForSummary(messages);
+  const prompt = loadSummarizationPrompt(options.promptFile);
 
   const Model = getModel(modelConfig.type || "openai");
   const model = new Model(modelConfig.config);
 
   const promptTemplate = ChatPromptTemplate.fromMessages([
-    new SystemMessage({ content: [{ type: "text", text: SUMMARIZATION_PROMPT }] }),
+    new SystemMessage({ content: [{ type: "text", text: prompt }] }),
     new HumanMessage({ content: [{ type: "text", text: `Here is the conversation to summarize:\n\n${formattedText}` }] })
   ]);
 
@@ -92,11 +127,23 @@ export async function compactMessages(messages, modelConfig, options = {}) {
   const messagesToSummarize = conversationMessages.slice(0, conversationMessages.length - keepLast);
   const keptMessages = conversationMessages.slice(conversationMessages.length - keepLast);
 
-  const summaryContent = await summarizeMessages(messagesToSummarize, modelConfig);
+  // Extract file operations from messages being summarized
+  const fileOps = extractFileOps(messagesToSummarize);
+
+  // Also collect file ops from any previous compaction summary
+  const previousOps = extractPreviousFileOps(messagesToSummarize);
+  const mergedOps = mergeFileOps(previousOps, fileOps);
+
+  const summaryContent = await summarizeMessages(messagesToSummarize, modelConfig, {
+    promptFile: options.promptFile
+  });
+
+  // Append file tracking to the structured summary
+  const fileTracking = formatFileTracking(mergedOps);
 
   const summaryMessage = {
     role: "assistant",
-    content: `[Summary of previous conversation]\n\n${summaryContent}`,
+    content: `[Summary of previous conversation]\n\n${summaryContent}${fileTracking}`,
     compacted: true,
     timestamp: Date.now()
   };
@@ -105,6 +152,104 @@ export async function compactMessages(messages, modelConfig, options = {}) {
 
   return [...systemMessages, summaryMessage, ...condensedKept];
 }
+
+// --- File operation tracking ---
+
+function extractFileOps(messages) {
+  const readFiles = new Set();
+  const modifiedFiles = new Set();
+  const executedCommands = new Set();
+
+  for (const msg of messages) {
+    if (msg.role === "assistant_with_tool") {
+      const toolCalls = extractToolCalls(msg);
+      for (const tc of toolCalls) {
+        const args = typeof tc.args === "string" ? tryParseJson(tc.args) : tc.args;
+
+        if (tc.name === "readFile" && args && args.path) {
+          readFiles.add(args.path);
+        } else if (tc.name === "writeFile" && args && args.path) {
+          modifiedFiles.add(args.path);
+        } else if (tc.name === "editFile" && args && args.path) {
+          modifiedFiles.add(args.path);
+        } else if (tc.name === "createDirectory" && args && args.path) {
+          modifiedFiles.add(args.path);
+        } else if (tc.name === "removeFiles" && args && args.path) {
+          modifiedFiles.add(args.path);
+        } else if (tc.name === "executeAux4" && args) {
+          const cmd = args.command || args;
+          if (typeof cmd === "string" && cmd.length < 200) {
+            executedCommands.add(cmd);
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    readFiles: [...readFiles],
+    modifiedFiles: [...modifiedFiles],
+    executedCommands: [...executedCommands].slice(0, 20) // cap to avoid bloat
+  };
+}
+
+function extractPreviousFileOps(messages) {
+  const readFiles = new Set();
+  const modifiedFiles = new Set();
+
+  for (const msg of messages) {
+    if (msg.compacted && typeof msg.content === "string") {
+      const readMatch = msg.content.match(/<read-files>([\s\S]*?)<\/read-files>/);
+      if (readMatch) {
+        readMatch[1].split(",").map(f => f.trim()).filter(Boolean).forEach(f => readFiles.add(f));
+      }
+      const modMatch = msg.content.match(/<modified-files>([\s\S]*?)<\/modified-files>/);
+      if (modMatch) {
+        modMatch[1].split(",").map(f => f.trim()).filter(Boolean).forEach(f => modifiedFiles.add(f));
+      }
+    }
+  }
+
+  return {
+    readFiles: [...readFiles],
+    modifiedFiles: [...modifiedFiles],
+    executedCommands: []
+  };
+}
+
+function mergeFileOps(previous, current) {
+  const readFiles = new Set([...previous.readFiles, ...current.readFiles]);
+  const modifiedFiles = new Set([...previous.modifiedFiles, ...current.modifiedFiles]);
+  const executedCommands = current.executedCommands; // only keep recent commands
+
+  return {
+    readFiles: [...readFiles],
+    modifiedFiles: [...modifiedFiles],
+    executedCommands
+  };
+}
+
+function formatFileTracking(ops) {
+  const parts = [];
+
+  if (ops.readFiles.length > 0) {
+    parts.push(`\n<read-files>${ops.readFiles.join(", ")}</read-files>`);
+  }
+  if (ops.modifiedFiles.length > 0) {
+    parts.push(`\n<modified-files>${ops.modifiedFiles.join(", ")}</modified-files>`);
+  }
+  if (ops.executedCommands.length > 0) {
+    parts.push(`\n<executed-commands>${ops.executedCommands.join("; ")}</executed-commands>`);
+  }
+
+  return parts.length > 0 ? "\n" + parts.join("") : "";
+}
+
+function tryParseJson(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+// --- Tool message condensation ---
 
 function condenseToolMessages(messages) {
   const result = [];

@@ -415,7 +415,8 @@ class Prompt {
           const compactionModel = this.compactionConfig.model || this.config;
           try {
             this.messages = await compactMessages(this.messages, compactionModel, {
-              keepLastMessages: this.compactionConfig.keepLastMessages || 6
+              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
+              promptFile: this.compactionConfig.promptFile
             });
             this.compacted = true;
           } catch (err) {
@@ -489,7 +490,8 @@ class Prompt {
           const compactionModel = this.compactionConfig.model || this.config;
           try {
             this.messages = await compactMessages(this.messages, compactionModel, {
-              keepLastMessages: this.compactionConfig.keepLastMessages || 6
+              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
+              promptFile: this.compactionConfig.promptFile
             });
             this.compacted = true;
           } catch (err) {
