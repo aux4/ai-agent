@@ -17,11 +17,20 @@ export class CodexApi {
     for (const tool of tools) {
       const openAiTool = convertToOpenAITool(tool);
       const fn = openAiTool.function;
+      // Truncate long descriptions for codex endpoint compatibility
+      let description = fn.description || "";
+      if (description.length > 1024) {
+        description = description.slice(0, 1024).replace(/\n[^\n]*$/, "") + "\n...";
+      }
+      // Clean parameters to match codex Responses API format
+      const params = { ...fn.parameters };
+      delete params.$schema;
+      delete params.additionalProperties;
       this.tools.push({
         type: "function",
         name: fn.name,
-        description: fn.description,
-        parameters: fn.parameters,
+        description,
+        parameters: params,
         strict: false
       });
       this.toolMap[fn.name] = tool;
@@ -80,7 +89,6 @@ export class CodexApi {
   async execute(messages, options = {}) {
     const instructions = this.extractInstructions(messages);
     const input = this.convertMessagesToInput(messages);
-
     const params = {
       model: this.modelName,
       input,
@@ -88,13 +96,21 @@ export class CodexApi {
       store: false
     };
     if (instructions) params.instructions = instructions;
-    if (this.tools.length > 0) params.tools = this.tools;
+    if (this.tools.length > 0) {
+      params.tools = this.tools;
+      params.tool_choice = "auto";
+    }
 
     const response = await this._request(params, options.streaming ? options.tokenCallback : null);
     const usage = this.extractTokenUsage(response);
     const functionCalls = (response.output || []).filter(item => item.type === "function_call");
 
     if (functionCalls.length > 0) {
+      const parseArgs = (args) => {
+        if (!args || args === "") return {};
+        try { return JSON.parse(args); } catch { return {}; }
+      };
+
       messages.push({
         role: "assistant_with_tool",
         content: {
@@ -103,7 +119,7 @@ export class CodexApi {
             tool_calls: functionCalls.map(fc => ({
               id: fc.call_id,
               name: fc.name,
-              args: JSON.parse(fc.arguments)
+              args: parseArgs(fc.arguments)
             }))
           }
         },
@@ -117,7 +133,7 @@ export class CodexApi {
             if (!tool) {
               return { role: "tool", content: `Error: Unknown tool "${fc.name}"`, tool_call_id: fc.call_id, name: fc.name, timestamp: Date.now() };
             }
-            const result = await tool.invoke(JSON.parse(fc.arguments));
+            const result = await tool.invoke(parseArgs(fc.arguments));
             return { role: "tool", content: typeof result === "string" ? result : JSON.stringify(result), tool_call_id: fc.call_id, name: fc.name, timestamp: Date.now() };
           } catch (error) {
             return { role: "tool", content: `Error executing tool "${fc.name}": ${error.message}`, tool_call_id: fc.call_id, name: fc.name, timestamp: Date.now() };
@@ -164,6 +180,7 @@ export class CodexApi {
 
     let completedResponse = null;
     let accumulatedText = "";
+    const functionCallsMap = new Map();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -188,6 +205,30 @@ export class CodexApi {
             accumulatedText += event.delta || "";
             if (tokenCallback) tokenCallback(event.delta);
           }
+          if (event.type === "response.output_item.added" && event.item && event.item.type === "function_call") {
+            const item = event.item;
+            const key = item.id || item.call_id;
+            functionCallsMap.set(key, {
+              type: "function_call",
+              call_id: item.call_id || item.id,
+              name: item.name,
+              arguments: item.arguments || ""
+            });
+          }
+          if (event.type === "response.function_call_arguments.delta") {
+            const key = event.item_id || event.call_id;
+            const fc = functionCallsMap.get(key);
+            if (fc) {
+              fc.arguments += event.delta || "";
+            }
+          }
+          if (event.type === "response.function_call_arguments.done") {
+            const key = event.item_id || event.call_id;
+            const fc = functionCallsMap.get(key);
+            if (fc) {
+              fc.arguments = event.arguments || fc.arguments;
+            }
+          }
           if (event.type === "response.completed" || event.type === "response.done") {
             completedResponse = event.response;
           }
@@ -206,6 +247,25 @@ export class CodexApi {
     if (!completedResponse) {
       completedResponse = { id: null, output: [], output_text: accumulatedText, usage: {} };
     }
+
+    // Merge incrementally tracked function calls into the response output
+    if (functionCallsMap.size > 0) {
+      if (!completedResponse.output) completedResponse.output = [];
+      for (const fc of functionCallsMap.values()) {
+        const existing = completedResponse.output.find(
+          item => item.type === "function_call" && item.call_id === fc.call_id
+        );
+        if (existing) {
+          // Update with tracked arguments (completed response may have empty args)
+          if (fc.arguments && fc.arguments !== "") {
+            existing.arguments = fc.arguments;
+          }
+        } else {
+          completedResponse.output.push(fc);
+        }
+      }
+    }
+
     if (!completedResponse.output_text) {
       if (completedResponse.output) {
         completedResponse.output_text = completedResponse.output
