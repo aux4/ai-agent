@@ -1,17 +1,12 @@
 # aux4/ai-agent
 
-AI agent
+Lightweight AI agent runtime for aux4 with RAG, tool usage, image generation, and interactive chat.
 
-This package provides a small aux4-powered AI agent that can learn from documents, run semantic searches against a local vector store, ask questions to a configured LLM, run interactive chat sessions, generate and inspect images, and call aux4 tools during conversations. It's designed as a lightweight RAG (retrieval-augmented generation) and assistant runtime that fits into the aux4 ecosystem.
-
-Main use cases:
-- Ingest plain text documents into a local vector store and run semantic queries (learn + search).
-- Ask direct or contextual questions to an LLM using a prompt template and optional context or images.
-- Generate images from text prompts and save them to disk (single or multiple images).
-- Let the agent call local aux4 commands/tools as part of a workflow (tool usage).
-- Inspect conversation history and run interactive chat loops.
-
-This README describes installation, the primary commands, parameters, and realistic examples taken from the test suite so you can get started quickly.
+- Ingest documents into a local vector store and run semantic queries (learn + search)
+- Ask questions to a configured LLM with optional context or images
+- Generate images from text prompts
+- Let the agent call local aux4 commands as tools during conversations
+- Inspect conversation history and run interactive chat loops
 
 ## Installation
 
@@ -21,17 +16,15 @@ aux4 aux4 pkger install aux4/ai-agent
 
 ## Quick Start
 
-The single most common use case is asking a quick factual question using the package's ask command. The tests use the following invocation:
-
 ```bash
 aux4 ai agent ask --config --question "What's the capital of France? Just output the name of the city, nothing else."
 ```
 
-This runs the agent using the configured instructions and prompt behavior (the --config flag tells the agent to load configured instructions). The test expects the agent to return:
-
+```text
 Paris
+```
 
-(Only the city name is returned because the question explicitly requests it.)
+The `--config` flag tells the agent to load configured instructions from the instructions file.
 
 For command documentation see [aux4 ai agent ask](./commands/ai/agent/ask).
 
@@ -67,23 +60,23 @@ Key variables (from the package help):
 - skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
 - question (arg: true) — the question to ask (positional/argument).
 
-Usage examples (from tests):
+Usage examples:
 
-1) Basic question (test example):
+1) Basic question:
 
 ```bash
 aux4 ai agent ask --config --question "What's the capital of France? Just output the name of the city, nothing else."
 ```
 
-This returns only "Paris" in the test expectation.
+Returns only "Paris".
 
-2) Asking with an image (see Images section for how images are generated, then you can call ask to inspect):
+2) Asking with an image:
 
 ```bash
 aux4 ai agent ask "Can you see geometric shapes in this image? Answer only yes or no." --image 1-multi-test.png --config
 ```
 
-The test expects a partial response "yes".
+Returns "yes".
 
 3) Streaming output (tokens print as they arrive):
 
@@ -132,13 +125,13 @@ Display a formatted view of conversation history JSON.
 Key variables:
 - historyFile (arg: true, default: history.json) — history file to show.
 
-Usage example (test uses this to inspect tool calls and outputs):
+Usage example:
 
 ```bash
 aux4 ai agent history
 ```
 
-This prints conversation entries in a readable format. In tests it is used to confirm tool invocations are recorded.
+This prints conversation entries in a readable format, including tool invocations.
 
 For more details see [aux4 ai agent history](./commands/ai/agent/history).
 
@@ -163,7 +156,7 @@ Key variables:
 - doc (arg: true) — file path to the document to learn from.
 - type (default: "") — optional document type.
 
-Real example (from tests):
+Example:
 Create simple document files then learn them.
 
 france.txt:
@@ -181,7 +174,7 @@ spain.txt:
 Capital of Spain is Madrid
 ```
 
-Commands from tests:
+Commands:
 
 ```bash
 aux4 ai agent learn france.txt
@@ -195,16 +188,16 @@ After learning, a search like the following returns the most relevant stored sen
 aux4 ai agent search "What is the capital of France?"
 ```
 
-Expected result in the test initially:
+Result:
 Capital of France is London
 
-The tests also demonstrate updating a file and re-learning to update the store:
+You can update a document and re-learn to update the store:
 ```bash
 echo "Capital of France is Paris" > france.txt
 aux4 ai agent learn france.txt
 aux4 ai agent search "What is the capital of France?"
 ```
-Expected now:
+Result:
 Capital of France is Paris
 
 Notes:
@@ -224,19 +217,17 @@ Key variables:
 - limit (default: "1") — number of results to return
 - query (arg: true) — the search query
 
-Usage example (from tests):
+Usage example:
 
 ```bash
 aux4 ai agent search "What is the capital of England?"
 ```
 
-Expected:
+Output:
 Capital of England is London
 
-Edge cases:
-- If no documents exist in storage, the command returns the error:
-No documents have been indexed yet. Please use 'aux4 ai agent learn <document>' to add documents to the vector store first.
-This behavior is exercised in the tests and is useful for detecting an empty store before trying to search.
+If no documents exist in storage, the command returns an error:
+`No documents have been indexed yet. Please use 'aux4 ai agent learn <document>' to add documents to the vector store first.`
 
 For more details see [aux4 ai agent search](./commands/ai/agent/search).
 
@@ -247,13 +238,13 @@ Remove the local vector store files to forget learned documents. This is handy i
 Key variables:
 - storage (default: .llm)
 
-Behavior (test expectation and usage):
+Usage:
 
 ```bash
 aux4 ai agent forget
 ```
 
-This deletes the vector store artifacts in the storage directory (docstore.json, faiss.index, ids.json) and subsequent searches will report that no documents are indexed.
+This deletes the vector store artifacts in the storage directory and subsequent searches will report that no documents are indexed.
 
 For more details see [aux4 ai agent forget](./commands/ai/agent/forget).
 
@@ -281,25 +272,25 @@ Key variables:
 - model (default: "{}") — model configuration JSON (for example: {"type":"openai","config":{"model":"dall-e-3"}}).
 - quantity (default: "1") — number of images to generate; if >1, outputs are numbered files.
 
-Examples (from tests):
+Examples:
 
-1) Single image generation (test):
+1) Single image generation:
 
 ```bash
 aux4 ai agent image --prompt "full white background, red circle 2D (not a sphere) in the middle, no shadow, no details, simple drawing, nothing else" --image image-test.png
 ```
 
-Expected test output:
+Output:
 Generating image...
 Image saved to image-test.png
 
-2) Multiple images with specific model and lower quality (test):
+2) Multiple images with specific model and lower quality:
 
 ```bash
 aux4 ai agent image --prompt "simple geometric shapes on white background" --image multi-test.png --quantity 3 --quality low --model '{"type":"openai","config":{"model":"gpt-image-1-mini"}}'
 ```
 
-Expected test output sequence:
+Output:
 Generating image...
 Generating image 1/3...
 Generating image 2/3...
@@ -309,13 +300,13 @@ Image saved to 2-multi-test.png
 Image saved to 3-multi-test.png
 
 Using images as input to ask:
-After generating or saving an image, you can pass the saved filename(s) to the ask command with the --image parameter. For example (from tests):
+After generating or saving an image, pass the filename to the ask command with the --image parameter:
 
 ```bash
 aux4 ai agent ask "Can you see geometric shapes in this image? Answer only yes or no." --image 1-multi-test.png --config
 ```
 
-The test expects a partial match "yes".
+Returns "yes".
 
 Notes:
 - The package supports a pluggable model configuration via the model JSON parameter. Use model JSON to pick the image backend/configuration when available.
@@ -693,9 +684,9 @@ config:
 Overview
 The agent can call local aux4 commands (tools) during execution. This enables safe tool use patterns like looking up or running local commands, generating data with small auxiliary commands, or calling other package commands.
 
-The test suite demonstrates creating a simple tool and letting the AI call it.
+The agent can call local aux4 commands during execution.
 
-Example tool definition used in the tests (the test writes this snippet to a .aux4 file for the test environment):
+Example tool definition (a simple `.aux4` command):
 
 ```json
 {
@@ -728,34 +719,34 @@ Example tool definition used in the tests (the test writes this snippet to a .au
 }
 ```
 
-Using the tool directly (test):
+Using the tool directly:
 
 ```bash
 aux4 print-name --firstName "Jane" --lastName "Doe"
 ```
 
-Expected:
+Output:
 User Doe, Jane from the tool
 
-Letting the agent invoke the tool
-The tests demonstrate instructing the agent to call the aux4 tool and return only the tool output. The ai agent can use the executeAux4 integration to run local commands during a response. Example from tests:
+Letting the agent invoke the tool:
+The agent can use the executeAux4 integration to run local commands during a response:
 
 ```bash
 aux4 ai agent ask "print the user name John Doe using the aux4 tool, calling print-name command, using the --firstName and --lastName parameters. Just output the tool output nothing else. No explanations." --config --history history.json
 ```
 
-Expected:
+Output:
 User Doe, John from the tool
 
-The history command is then used in the tests to confirm that the agent recorded the executeAux4 call:
+Use the history command to confirm tool calls were recorded:
 
 ```bash
 aux4 ai agent history
 ```
 
-The test expects parts of the history to include:
+The history includes:
 executeAux4(command: print-name --firstName John --lastName Doe)
-and the tool output lines "User Doe, John from the tool".
+and the tool output "User Doe, John from the tool".
 
 Notes:
 - Tools run by the agent must be available in the active aux4 environment.
@@ -876,7 +867,7 @@ Generate a simple single image:
 aux4 ai agent image --prompt "full white background, red circle 2D (not a sphere) in the middle, no shadow, no details, simple drawing, nothing else" --image image-test.png
 ```
 
-Expect:
+Output:
 Generating image...
 Image saved to image-test.png
 
@@ -888,29 +879,29 @@ aux4 ai agent image --prompt "simple geometric shapes on white background" --ima
 aux4 ai agent ask "Can you see geometric shapes in this image? Answer only yes or no." --image 1-multi-test.png --config
 ```
 
-Expected image generation output includes:
+Image generation output:
 Generating image 1/3...
 ...
 Image saved to 1-multi-test.png
-And the ask command expects a partial "yes" answer in the test.
+The ask command returns "yes".
 
 ### Example 3 — Use the agent as a tool orchestrator
-Create a small tool in your environment (the test demonstrates how a .aux4 command called print-name works). Called directly:
+Create a small tool in your environment (a `.aux4` command called print-name). Called directly:
 
 ```bash
 aux4 print-name --firstName "Jane" --lastName "Doe"
 ```
 
-Expect:
+Output:
 User Doe, Jane from the tool
 
-Ask the agent to invoke the tool and return the tool output (test example):
+Ask the agent to invoke the tool and return the tool output:
 
 ```bash
 aux4 ai agent ask "print the user name John Doe using the aux4 tool, calling print-name command, using the --firstName and --lastName parameters. Just output the tool output nothing else. No explanations." --config --history history.json
 ```
 
-Expect:
+Output:
 User Doe, John from the tool
 
 Then inspect the recorded history:
@@ -922,13 +913,13 @@ aux4 ai agent history
 The history includes the executeAux4 invocation and the tool outputs.
 
 ### Example 4 — Contextual structured outputs (search + JSON)
-The tests include context-driven examples where the agent is configured with instructions and asked to return strict JSON based on search results. Use AGENTS.md and schema.json to constrain responses and call ask with --config to apply them:
+Use AGENTS.md and schema.json to constrain responses and call ask with --config to apply them:
 
 ```bash
 aux4 ai agent ask "What is the role and company of John Doe?" --config
 ```
 
-The test expects structured JSON, for example:
+Returns structured JSON:
 
 ```json
 {
