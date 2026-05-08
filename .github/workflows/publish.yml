@@ -56,6 +56,9 @@ jobs:
       - name: Install pkger
         run: curl -fsSL https://pkger.aux4.sh | sh
 
+      - name: Install jest
+        run: npm i -g jest
+
       - name: Install test package
         run: aux4 aux4 pkger install aux4/test
 
@@ -96,6 +99,9 @@ jobs:
 
       - name: Install pkger
         run: curl -fsSL https://pkger.aux4.sh | sh
+
+      - name: Install jest
+        run: npm i -g jest
 
       - name: Install test package
         run: aux4 aux4 pkger install aux4/test
