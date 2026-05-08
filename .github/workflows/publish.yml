@@ -45,10 +45,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Test
-        uses: aux4/test-package-action@v1
-        with:
-          build_command: npm run build
+      - name: Build
+        run: npm run build
+
+      - name: Install aux4
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> $GITHUB_PATH
+
+      - name: Install test package
+        run: aux4 aux4 pkger install aux4/test
+
+      - name: Run tests
+        working-directory: package
+        run: |
+          aux4 test run test/learn.test.md
+          aux4 test run test/rag.test.md
 
   test-darwin:
     runs-on: macos-latest
@@ -64,10 +76,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Test
-        uses: aux4/test-package-action@v1
-        with:
-          build_command: npm run build
+      - name: Build
+        run: npm run build
+
+      - name: Install aux4
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> $GITHUB_PATH
+
+      - name: Install test package
+        run: aux4 aux4 pkger install aux4/test
+
+      - name: Run tests
+        working-directory: package
+        run: |
+          aux4 test run test/learn.test.md
+          aux4 test run test/rag.test.md
 
   publish:
     needs: [test-linux, test-darwin]
