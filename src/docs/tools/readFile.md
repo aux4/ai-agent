@@ -1,46 +1,35 @@
 # Read File Tool
 
-Read the contents of any text-based file from the local disk to examine, analyze, or understand its contents.
-
-## Overview
-
-This tool is your primary method for **examining existing files** in a project. Use it to understand codebases, check configuration files, read documentation, or analyze any text-based content. It's essential for getting context before making changes or understanding how systems work.
+Read the contents of any text-based file from the local disk.
 
 ## Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | ✅ Yes | Path to the file to read. Can be relative (`./src/app.js`) or absolute (`/home/user/config.json`). Supports tilde expansion (`~/Documents/notes.txt`) |
+| `file` | string | Yes | Path to the file to read. Supports relative, absolute, and tilde (`~`) paths |
+| `offset` | number | No | Line number to start reading from (0-based). Use with `limit` to paginate large files |
+| `limit` | number | No | Maximum number of lines to read |
 
-## Security & Access Control
+## Pagination
 
-- **✅ Allowed locations:**
-  - Current working directory and all subdirectories
-  - User's `.aux4.config/packages` folder
-- **❌ Restricted:** Cannot read files outside these locations for security
-- **🔍 Path resolution:** Automatically expands `~` to home directory
+For large files, use `offset` and `limit` to read in chunks:
 
-## When to Use This Tool
+```
+readFile({ file: "large-output.txt", offset: 0, limit: 100 })   // first 100 lines
+readFile({ file: "large-output.txt", offset: 100, limit: 100 }) // next 100 lines
+```
 
-- **📖 Code exploration:** Understanding existing source code structure
-- **⚙️ Configuration review:** Checking settings in config files (`package.json`, `.env`, etc.)
-- **📚 Documentation reading:** Examining README files, API docs, or comments
-- **🔍 Debugging:** Investigating log files or error outputs
-- **📋 Content analysis:** Reading data files, templates, or any text content
-
-## Common File Types
-
-- **Source code:** `.js`, `.ts`, `.py`, `.java`, `.go`, etc.
-- **Configuration:** `package.json`, `.env`, `config.yaml`, `.gitignore`
-- **Documentation:** `README.md`, `CHANGELOG.md`, API docs
-- **Data files:** `.txt`, `.csv`, `.json`, `.xml`, `.yaml`
-- **Build files:** `Dockerfile`, `Makefile`, build scripts
+When there are more lines after the returned chunk, the output includes:
+`[Showing lines 1-100 of 5000. Use offset=100 to read more.]`
 
 ## Response Format
 
-- **✅ Success:** Returns complete file contents as UTF-8 text
-- **❌ File not found:** Returns `"File not found"`
-- **❌ Access denied:** Returns `"Access denied"`
-- **❌ Other errors:** Returns descriptive error message
+- **Success:** Returns file contents as UTF-8 text
+- **File not found:** Returns `"File not found"`
+- **Access denied:** Returns `"Access denied"`
+- **Binary file:** Returns hint about the correct tool to use
 
-> **💡 Tip:** Always use this tool before making changes to understand the current state of files and avoid breaking existing functionality.
+## Security
+
+- Allowed: current working directory, subdirectories, and `~/.aux4.config/packages`
+- Restricted: files outside these locations

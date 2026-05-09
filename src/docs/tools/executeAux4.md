@@ -1,37 +1,42 @@
 # Execute Aux4 CLI Tool
 
-Run any aux4 command. Do NOT include the `aux4` prefix — just provide the command and arguments.
+Run any aux4 command. The `aux4` prefix is added automatically — just provide the command name and arguments.
 
 ## Parameters
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
-| `command` | string | Yes      | The aux4 command to execute (without the `aux4` prefix) |
+| `command` | string | Yes      | The command to execute (without `aux4` prefix) |
 | `stdin`   | string | No       | Data to pass as stdin |
 | `timeout` | number | No       | Timeout in seconds (default: 60, 0 = no timeout) |
 
 ## Command Format
 
-**Correct:** `"aux4 version"`, `"aux4 pkger list"`, `"browser start"`
-**Wrong:** `"pkger list"`, `"help"`, `"version"`
+The tool runs `aux4 <your command>`. Do NOT add `aux4` yourself.
 
-aux4 has a built-in command called `aux4` that provides package management and system tools. Commands under this namespace use the `aux4` prefix:
+**Correct:** `"pdf parse file.pdf"`, `"browser open --url https://example.com"`, `"config get key"`
+**Wrong:** `"aux4 pdf parse file.pdf"`, `"aux4 browser open"`, `"aux4 config get key"`
+
+The only exception is `aux4` subcommands (package management, version, man pages) which live under the `aux4` namespace:
 - `"aux4 version"` — show aux4 version
 - `"aux4 pkger list"` — list installed packages
-- `"aux4 pkger list --filter name"` — search packages
-- `"aux4 pkger install scope/package"` — install a package
-- `"aux4 pkger uninstall scope/package"` — uninstall a package
-- `"aux4 pkger man scope/package"` — view package docs
 - `"aux4 man command"` — show command manual
 
-All other commands are called directly by their name (e.g., `"browser start"`, `"pinterest pin list"`, `"config get key"`).
+These require `aux4` because `aux4` is the command name, making the full invocation `aux4 aux4 version`.
 
 ## Discovery
 
 Use `--help` to explore any command:
-- `""` — list all top-level commands
-- `"command --help"` — show help for a command
-- `"command subcommand --help"` — show help for a subcommand
+- `"--help"` — list all top-level commands
+- `"pdf --help"` — show help for pdf
+- `"browser open --help"` — show help for browser open
+
+## Large Output
+
+When a command produces output larger than 10KB, the result is truncated and you'll see:
+`[Output truncated: X bytes total. Full output was written to /tmp/path/to/file]`
+
+**When this happens, use `readFile` to read the full output from the temp file path.** Do not work with truncated data — always read the full file.
 
 ## Timeout Behavior
 

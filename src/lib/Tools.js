@@ -42,7 +42,11 @@ function expandTildePath(filePath) {
 // Helper function to check if path is allowed for read-only access
 function isReadOnlyPathAllowed(filePath, currentDirectory) {
   const aux4ConfigPath = path.join(os.homedir(), ".aux4.config", "packages");
-  return filePath.startsWith(currentDirectory) || filePath.startsWith(aux4ConfigPath);
+  const tmpDir = os.tmpdir();
+  return filePath.startsWith(currentDirectory)
+    || filePath.startsWith(aux4ConfigPath)
+    || filePath.startsWith(tmpDir)
+    || filePath.startsWith("/tmp/");
 }
 
 // Binary file extensions that should not be read as text
@@ -65,7 +69,7 @@ const BINARY_TOOL_HINTS = {
 };
 
 export const readLocalFileTool = tool(
-  async ({ file }) => {
+  async ({ file, offset, limit }) => {
     try {
       const expandedPath = expandTildePath(file);
       const filePath = path.resolve(expandedPath);
@@ -79,7 +83,22 @@ export const readLocalFileTool = tool(
         return `Cannot read binary file (${ext}). ${hint}`.trim();
       }
 
-      return fs.readFileSync(filePath, { encoding: "utf-8" });
+      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
+
+      if (offset !== undefined || limit !== undefined) {
+        const lines = content.split("\n");
+        const start = offset || 0;
+        const end = limit !== undefined ? start + limit : lines.length;
+        const sliced = lines.slice(start, end);
+        const totalLines = lines.length;
+        let result = sliced.join("\n");
+        if (end < totalLines) {
+          result += `\n\n[Showing lines ${start + 1}-${end} of ${totalLines}. Use offset=${end} to read more.]`;
+        }
+        return result;
+      }
+
+      return content;
     } catch (e) {
       if (e.code === "ENOENT") {
         return "File not found";
@@ -93,7 +112,9 @@ export const readLocalFileTool = tool(
     name: "readFile",
     description: readFileDesc,
     schema: z.object({
-      file: z.string()
+      file: z.string(),
+      offset: z.number().optional().describe("Line number to start reading from (0-based). Use with limit to paginate large files."),
+      limit: z.number().optional().describe("Maximum number of lines to read. Use with offset to paginate large files.")
     })
   }
 );
@@ -215,12 +236,29 @@ export const listFilesTool = tool(
         const fullPath = path.join(directory, entry.name);
         const relPath = path.relative(currentDirectory, fullPath);
         if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
-        if (entry.isFile()) {
+
+        let isFile = entry.isFile();
+        let isDir = entry.isDirectory();
+        if (entry.isSymbolicLink()) {
+          try {
+            const stat = fs.statSync(fullPath);
+            isFile = stat.isFile();
+            isDir = stat.isDirectory();
+          } catch { continue; }
+        }
+
+        if (isFile) {
           result.push(relPath);
-        } else if (entry.isDirectory() && recurse) {
+        } else if (isDir && recurse) {
           const subFiles = fs
             .readdirSync(fullPath, { withFileTypes: true })
-            .filter(e => e.isFile())
+            .filter(e => {
+              if (e.isFile()) return true;
+              if (e.isSymbolicLink()) {
+                try { return fs.statSync(path.join(fullPath, e.name)).isFile(); } catch { return false; }
+              }
+              return false;
+            })
             .map(e => path.join(relPath, e.name))
             .filter(p => !excludePrefixes.some(prefix => p.startsWith(prefix)));
           result.push(...subFiles);
@@ -661,7 +699,7 @@ async function checkFileAccess(scope, filePath, permissions) {
 
 // Factory: readFile with permission checking
 export const createReadFileTool = (permissions) => tool(
-  async ({ file }) => {
+  async ({ file, offset, limit }) => {
     try {
       const expandedPath = expandTildePath(file);
       const filePath = path.resolve(expandedPath);
@@ -679,7 +717,22 @@ export const createReadFileTool = (permissions) => tool(
         return `Cannot read binary file (${ext}). ${hint}`.trim();
       }
 
-      return fs.readFileSync(filePath, { encoding: "utf-8" });
+      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
+
+      if (offset !== undefined || limit !== undefined) {
+        const lines = content.split("\n");
+        const start = offset || 0;
+        const end = limit !== undefined ? start + limit : lines.length;
+        const sliced = lines.slice(start, end);
+        const totalLines = lines.length;
+        let result = sliced.join("\n");
+        if (end < totalLines) {
+          result += `\n\n[Showing lines ${start + 1}-${end} of ${totalLines}. Use offset=${end} to read more.]`;
+        }
+        return result;
+      }
+
+      return content;
     } catch (e) {
       if (e.code === "ENOENT") return "File not found";
       if (e.code === "EACCES") return "Access denied";
@@ -689,7 +742,11 @@ export const createReadFileTool = (permissions) => tool(
   {
     name: "readFile",
     description: readFileDesc,
-    schema: z.object({ file: z.string() })
+    schema: z.object({
+      file: z.string(),
+      offset: z.number().optional().describe("Line number to start reading from (0-based). Use with limit to paginate large files."),
+      limit: z.number().optional().describe("Maximum number of lines to read. Use with offset to paginate large files.")
+    })
   }
 );
 
@@ -895,12 +952,29 @@ export const createListFilesTool = (permissions) => tool(
         const fullPath = path.join(directory, entry.name);
         const relPath = path.relative(currentDirectory, fullPath);
         if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
-        if (entry.isFile()) {
+
+        let isFile = entry.isFile();
+        let isDir = entry.isDirectory();
+        if (entry.isSymbolicLink()) {
+          try {
+            const stat = fs.statSync(fullPath);
+            isFile = stat.isFile();
+            isDir = stat.isDirectory();
+          } catch { continue; }
+        }
+
+        if (isFile) {
           result.push(relPath);
-        } else if (entry.isDirectory() && recurse) {
+        } else if (isDir && recurse) {
           const subFiles = fs
             .readdirSync(fullPath, { withFileTypes: true })
-            .filter(e => e.isFile())
+            .filter(e => {
+              if (e.isFile()) return true;
+              if (e.isSymbolicLink()) {
+                try { return fs.statSync(path.join(fullPath, e.name)).isFile(); } catch { return false; }
+              }
+              return false;
+            })
             .map(e => path.join(relPath, e.name))
             .filter(p => !excludePrefixes.some(prefix => p.startsWith(prefix)));
           result.push(...subFiles);
