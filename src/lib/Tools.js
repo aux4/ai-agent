@@ -311,7 +311,7 @@ export const createDirectoryTool = tool(
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
 
-function executeWithTimeout(cmd, { stdin, timeout } = {}) {
+function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
   const tmpDir = os.tmpdir();
@@ -330,10 +330,13 @@ function executeWithTimeout(cmd, { stdin, timeout } = {}) {
       try { fs.closeSync(stderrFd); } catch {}
     }
 
-    const child = spawn("sh", ["-c", cmd], {
+    const spawnOptions = {
       stdio: ["pipe", stdoutFd, stderrFd],
       detached: false,
-    });
+    };
+    if (cwd) spawnOptions.cwd = cwd;
+
+    const child = spawn("sh", ["-c", cmd], spawnOptions);
 
     if (stdin) {
       child.stdin.write(stdin);
@@ -495,7 +498,7 @@ function formatTimeoutMessage(command, timeout, error) {
 }
 
 export const executeAux4CliTool = tool(
-  async ({ command, stdin, timeout }) => {
+  async ({ command, stdin, timeout, cwd }) => {
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
       if (matchesPattern(command, pattern)) {
@@ -504,7 +507,7 @@ export const executeAux4CliTool = tool(
     }
 
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
+      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -519,7 +522,8 @@ export const executeAux4CliTool = tool(
     schema: z.object({
       command: z.string(),
       stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed.")
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
+      cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
     })
   }
 );
@@ -592,7 +596,7 @@ const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
 
 // Factory that wraps executeAux4 with permission checking
 export const createExecuteAux4Tool = (permissions) => tool(
-  async ({ command, stdin, timeout }) => {
+  async ({ command, stdin, timeout, cwd }) => {
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
       if (matchesPattern(command, pattern)) {
@@ -636,7 +640,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout });
+      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -651,7 +655,8 @@ export const createExecuteAux4Tool = (permissions) => tool(
     schema: z.object({
       command: z.string(),
       stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed.")
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
+      cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
     })
   }
 );
@@ -1043,7 +1048,8 @@ export const createSearchFilesTool = (permissions) => tool(
               for (let i = 0; i < lines.length; i++) {
                 if (results.length >= maxResults) return;
                 if (lines[i].toLowerCase().includes(lowerPattern)) {
-                  results.push(`${relPath}:${i + 1}: ${lines[i]}`);
+                  const line = lines[i].length > 500 ? lines[i].slice(0, 500) + "..." : lines[i];
+                  results.push(`${relPath}:${i + 1}: ${line}`);
                 }
               }
             } catch { /* Skip binary or unreadable files */ }
@@ -1054,7 +1060,11 @@ export const createSearchFilesTool = (permissions) => tool(
       searchDir(directory);
 
       if (results.length === 0) return "No matches found";
-      return results.join("\n");
+      const output = results.join("\n");
+      if (output.length > 50000) {
+        return output.slice(0, 50000) + `\n\n[Output truncated: ${results.length} matches, ${output.length} chars total]`;
+      }
+      return output;
     } catch (e) {
       if (e.code === "ENOENT") return "Directory not found";
       if (e.code === "EACCES") return "Access denied";
@@ -1236,7 +1246,8 @@ export const searchFilesTool = tool(
               for (let i = 0; i < lines.length; i++) {
                 if (results.length >= maxResults) return;
                 if (lines[i].toLowerCase().includes(lowerPattern)) {
-                  results.push(`${relPath}:${i + 1}: ${lines[i]}`);
+                  const line = lines[i].length > 500 ? lines[i].slice(0, 500) + "..." : lines[i];
+                  results.push(`${relPath}:${i + 1}: ${line}`);
                 }
               }
             } catch {
@@ -1249,7 +1260,11 @@ export const searchFilesTool = tool(
       searchDir(directory);
 
       if (results.length === 0) return "No matches found";
-      return results.join("\n");
+      const output = results.join("\n");
+      if (output.length > 50000) {
+        return output.slice(0, 50000) + `\n\n[Output truncated: ${results.length} matches, ${output.length} chars total]`;
+      }
+      return output;
     } catch (e) {
       if (e.code === "ENOENT") return "Directory not found";
       if (e.code === "EACCES") return "Access denied";

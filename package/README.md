@@ -728,6 +728,13 @@ aux4 print-name --firstName "Jane" --lastName "Doe"
 Output:
 User Doe, Jane from the tool
 
+### executeAux4 Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `command` | The aux4 command to run (e.g., `print-name --firstName John --lastName Doe`) |
+| `cwd` | Working directory for the command. Defaults to the current directory. |
+
 Letting the agent invoke the tool:
 The agent can use the executeAux4 integration to run local commands during a response:
 
@@ -756,6 +763,37 @@ Notes:
 For more details see the related command docs:
 - The example tool command is available at [aux4 print-name](./commands/print-name) after installing or configuring it locally.
 - Agent calls are documented under [aux4 ai agent ask](./commands/ai/agent/ask) and [aux4 ai agent history](./commands/ai/agent/history).
+
+---
+
+## Debugging
+
+### Tool Call Logging
+
+When the agent calls tools during execution, it logs each invocation to stderr. This includes the tool name, arguments, execution time, and a short preview of the result. The format is:
+
+```
+[tool] name(args) => done (Ns) preview
+```
+
+For example:
+
+```
+[tool] readFile(file: README.md) => done (0.01s) # aux4/ai-agent...
+[tool] executeAux4(command: print-name --firstName John --lastName Doe) => done (0.5s) User Doe, John from the tool
+```
+
+Since the output goes to stderr, it does not interfere with the agent's stdout response. You can suppress it by redirecting stderr:
+
+```bash
+aux4 ai agent ask "Hello" --config 2>/dev/null
+```
+
+Or capture it to a file for inspection:
+
+```bash
+aux4 ai agent ask "Hello" --config 2>agent-debug.log
+```
 
 ---
 

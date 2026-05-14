@@ -5,9 +5,10 @@ const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex/responses";
 
 export class CodexApi {
   constructor(config = {}) {
-    const { model, refreshToken, apiKey, accountId } = config;
+    const { model, refreshToken, apiKey, accountId, codexAuth, ...extraParams } = config;
     this.modelName = model || "gpt-5.3-codex";
     this.accountId = accountId || "";
+    this.extraParams = extraParams;
     this.tokenManager = new TokenManager({ apiKey, refreshToken, codexAuth: true });
     this.tools = [];
     this.toolMap = {};
@@ -93,7 +94,8 @@ export class CodexApi {
       model: this.modelName,
       input,
       stream: true,
-      store: false
+      store: false,
+      ...this.extraParams
     };
     if (instructions) params.instructions = instructions;
     if (this.tools.length > 0) {
@@ -126,16 +128,27 @@ export class CodexApi {
         timestamp: Date.now()
       });
 
+      const toolNames = functionCalls.map(fc => fc.name).join(", ");
+      console.error(`[tools] calling: ${toolNames}`);
       const toolResults = await Promise.all(
         functionCalls.map(async (fc) => {
+          const argsPreview = fc.arguments ? fc.arguments.slice(0, 200) : "";
+          console.error(`[tool] ${fc.name}(${argsPreview})`);
+          const startTime = Date.now();
           try {
             const tool = this.toolMap[fc.name];
             if (!tool) {
+              console.error(`[tool] ${fc.name} => unknown tool`);
               return { role: "tool", content: `Error: Unknown tool "${fc.name}"`, tool_call_id: fc.call_id, name: fc.name, timestamp: Date.now() };
             }
             const result = await tool.invoke(parseArgs(fc.arguments));
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            const preview = typeof result === "string" ? result.slice(0, 100) : "";
+            console.error(`[tool] ${fc.name} => done (${elapsed}s) ${preview}`);
             return { role: "tool", content: typeof result === "string" ? result : JSON.stringify(result), tool_call_id: fc.call_id, name: fc.name, timestamp: Date.now() };
           } catch (error) {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            console.error(`[tool] ${fc.name} => error (${elapsed}s): ${error.message}`);
             return { role: "tool", content: `Error executing tool "${fc.name}": ${error.message}`, tool_call_id: fc.call_id, name: fc.name, timestamp: Date.now() };
           }
         })

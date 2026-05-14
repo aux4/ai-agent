@@ -346,11 +346,17 @@ class Prompt {
         }
 
         // Execute all tool calls in parallel
+        const toolNames = response.tool_calls.map(tc => tc.name).join(", ");
+        console.error(`[tools] calling: ${toolNames}`);
         const toolResults = await Promise.all(
           response.tool_calls.map(async (toolCall) => {
+            const argsPreview = typeof toolCall.args === "object" ? JSON.stringify(toolCall.args).slice(0, 200) : "";
+            console.error(`[tool] ${toolCall.name}(${argsPreview})`);
+            const startTime = Date.now();
             try {
               const tool = this.tools[toolCall.name];
               if (!tool) {
+                console.error(`[tool] ${toolCall.name} => unknown tool`);
                 return {
                   role: "tool",
                   content: `Error: Unknown tool "${toolCall.name}". Available tools: ${Object.keys(this.tools).join(", ")}`,
@@ -360,6 +366,9 @@ class Prompt {
                 };
               }
               const toolResponse = await tool.invoke(toolCall.args);
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              const preview = typeof toolResponse === "string" ? toolResponse.slice(0, 100) : "";
+              console.error(`[tool] ${toolCall.name} => done (${elapsed}s) ${preview}`);
               return {
                 role: "tool",
                 content: toolResponse,
@@ -368,7 +377,8 @@ class Prompt {
                 timestamp: Date.now()
               };
             } catch (error) {
-              console.error(`Tool "${toolCall.name}" failed: ${error.message}`);
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              console.error(`[tool] ${toolCall.name} => error (${elapsed}s): ${error.message}`);
               return {
                 role: "tool",
                 content: `Error executing tool "${toolCall.name}": ${error.message}`,
@@ -491,7 +501,8 @@ class Prompt {
           try {
             this.messages = await compactMessages(this.messages, compactionModel, {
               keepLastMessages: this.compactionConfig.keepLastMessages || 6,
-              promptFile: this.compactionConfig.promptFile
+              promptFile: this.compactionConfig.promptFile,
+              codexApi: (!this.compactionConfig.model && this.apiType === "codex") ? this.codexApi : null
             });
             this.compacted = true;
           } catch (err) {
