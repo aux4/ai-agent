@@ -8,6 +8,7 @@ import { readFile, asJson } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
+import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
 import { CodexApi } from "./CodexApi.js";
@@ -30,8 +31,10 @@ class Prompt {
     this.config = config;
     this.toolsConfig = toolsConfig;
     this.compactionConfig = options.compaction || null;
+    this.policy = options.policy || null;
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
+    this.toolCallCount = 0;
     this.mcpClient = null;
     this.apiType = config.api || "chat";
 
@@ -52,6 +55,17 @@ class Prompt {
   }
 
   async init() {
+    // Wire the policy enforcement hook into the tool layer. The hook reads the LIVE
+    // accumulated token usage plus the consequential tool call count — no separate
+    // ledger. takeDecision lets execute() attach each decision to the history entry.
+    if (this.policy) {
+      this.toolsConfig = {
+        ...this.toolsConfig,
+        policy: this.policy,
+        getUsage: () => ({ ...this.tokenUsage, calls: this.toolCallCount })
+      };
+    }
+
     // Create tools with configuration if provided
     const configuredTools = Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools;
 
@@ -365,17 +379,33 @@ class Prompt {
                   timestamp: Date.now()
                 };
               }
-              const toolResponse = await tool.invoke(toolCall.args);
+
+              // Count consequential tool calls toward the policy budget and pass the
+              // call id so the policy can record its decision against this entry.
+              let invokeArgs = toolCall.args;
+              if (this.policy && CONSEQUENTIAL_POLICY_TOOLS.has(toolCall.name)) {
+                this.toolCallCount += 1;
+                invokeArgs = { ...toolCall.args, __policyCallId: toolCall.id };
+              }
+
+              const toolResponse = await tool.invoke(invokeArgs);
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
               const preview = typeof toolResponse === "string" ? toolResponse.slice(0, 100) : "";
               console.error(`[tool] ${toolCall.name} => done (${elapsed}s) ${preview}`);
-              return {
+              const entry = {
                 role: "tool",
                 content: toolResponse,
                 tool_call_id: toolCall.id,
                 name: toolCall.name,
                 timestamp: Date.now()
               };
+              // Attach the policy decision to the history entry (only when a policy
+              // is active and --history is set, takeDecision returns the record).
+              if (this.policy && this.historyFile) {
+                const decision = this.policy.takeDecision(toolCall.id);
+                if (decision) entry.policy = decision;
+              }
+              return entry;
             } catch (error) {
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
               console.error(`[tool] ${toolCall.name} => error (${elapsed}s): ${error.message}`);
@@ -554,13 +584,17 @@ class Prompt {
         .filter(message => message.role !== "system" || message.timestamp)
         .map(message => {
           if (message.role === "tool") {
-            return {
+            const entry = {
               role: "tool",
               content: message.content,
               tool_call_id: message.tool_call_id,
               name: message.name,
               timestamp: message.timestamp
             };
+            // Preserve the policy decision recorded on this tool entry (shared
+            // history/trace structure — the `policy` field on tool entries).
+            if (message.policy) entry.policy = message.policy;
+            return entry;
           }
           return message;
         });

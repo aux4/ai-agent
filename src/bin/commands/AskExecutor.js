@@ -5,6 +5,7 @@ import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
 import { loadSkillsCatalog } from "../../lib/Skills.js";
+import { Policy } from "../../lib/Policy.js";
 
 export async function askExecutor(params) {
   try {
@@ -28,6 +29,27 @@ export async function askExecutor(params) {
     const permissions = params.permissions;
     const references = params.references || (params.packageDir ? path.join(params.packageDir, "references") : "");
     const skills = params.skills || "skills";
+
+    // Optional policy guardrails. Polymorphic: a path string (or comma-separated
+    // list of layers), or an inline object. Absent => no policy => unchanged.
+    let policy = null;
+    const policySpec = params.policy;
+    const hasPolicy =
+      (typeof policySpec === "string" && policySpec.trim() !== "")
+      || (policySpec && typeof policySpec === "object" && Object.keys(policySpec).length > 0);
+    if (hasPolicy) {
+      let spec = policySpec;
+      if (typeof policySpec === "string" && policySpec.includes(",")) {
+        spec = policySpec.split(",").map(s => s.trim()).filter(Boolean);
+      }
+      policy = Policy.load(spec, {
+        staticPermissions: permissions,
+        agent: (bio && bio.name) || "agent",
+        runId: params.runId || history || "",
+        costs: params.costs || {},
+        escalationOptions: params.escalationWaitMs ? { waitMs: parseInt(params.escalationWaitMs) } : {}
+      });
+    }
 
     // AGENTS.md fallback: try AGENTS.md → AGENT.md → instructions.md
     let instructionsFile = instructions;
@@ -61,7 +83,7 @@ export async function askExecutor(params) {
       toolsConfig.skills = skills;
     }
 
-    const prompt = new Prompt(model, toolsConfig, { compaction });
+    const prompt = new Prompt(model, toolsConfig, { compaction, policy });
     await prompt.init();
 
     if (bio && typeof bio === "object" && Object.keys(bio).length > 0) {

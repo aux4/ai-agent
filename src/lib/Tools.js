@@ -7,6 +7,7 @@ import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import LlmStore from "./LlmStore.js";
 import { getEmbeddings } from "./Embeddings.js";
+import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
 
 // Import tool descriptions
 import readFileDesc from "../docs/tools/readFile.md?raw";
@@ -528,24 +529,9 @@ export const executeAux4CliTool = tool(
   }
 );
 
-// Convert a glob pattern (with * wildcards) to a RegExp
-export function matchesPattern(command, pattern) {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp("^" + escaped.replace(/\*/g, ".*") + "$");
-  return regex.test(command);
-}
-
-// Parse a permission pattern into its type and matching pattern
-// Returns { type: "command"|"file", scope?: string, pattern: string }
-export function parsePattern(pattern) {
-  const fileMatch = pattern.match(/^file:(read|write|delete):(.+)$/);
-  if (fileMatch) {
-    return { type: "file", scope: fileMatch[1], pattern: fileMatch[2] };
-  }
-  // Strip optional aux4: prefix for command patterns
-  const cmdPattern = pattern.startsWith("aux4:") ? pattern.slice(5) : pattern;
-  return { type: "command", pattern: cmdPattern };
-}
+// Re-exported from PatternUtils so existing importers keep working.
+export const matchesPattern = matchesPatternUtil;
+export const parsePattern = parsePatternUtil;
 
 // Parse a subject string into its type and value
 // Returns { type: "command"|"file", scope?: string, value: string }
@@ -1508,10 +1494,44 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
 
 export const searchContextTool = createSearchContextTool();
 
-export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions, references, skills } = config;
+// Wrap a built tool with the policy enforcement hook. Read-only tools are passed
+// through untouched (exempt for speed). Consequential tools get gated: before the
+// underlying tool runs, the policy decides allow/deny (reading the live token usage
+// supplied by getUsage). On deny the underlying tool never runs and the model gets a
+// short adaptive message. Every decision is recorded on the policy so Prompt can
+// attach it to the history `tool` entry when --history is set.
+function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
+  if (!policy) return underlyingTool;
 
-  return {
+  return tool(
+    async (args) => {
+      // Prompt injects the tool_call_id so the recorded decision can be matched to
+      // the corresponding history entry without colliding across parallel calls.
+      const callId = args && args.__policyCallId;
+      const cleanArgs = { ...args };
+      delete cleanArgs.__policyCallId;
+
+      const usage = (getUsage && getUsage()) || {};
+      const calls = usage.calls || 0;
+
+      const result = await policy.enforce(name, cleanArgs, usage, calls, callId);
+      if (result.blocked) {
+        return result.message;
+      }
+      return underlyingTool.invoke(cleanArgs);
+    },
+    {
+      name,
+      description: underlyingTool.description || (underlyingTool.lc_kwargs && underlyingTool.lc_kwargs.description) || name,
+      schema: underlyingTool.schema
+    }
+  );
+}
+
+export function createTools(config = {}) {
+  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage } = config;
+
+  const base = {
     readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
     writeFile: permissions ? createWriteFileTool(permissions) : writeLocalFileTool,
     editFile: permissions ? createEditFileTool(permissions) : editLocalFileTool,
@@ -1527,6 +1547,15 @@ export function createTools(config = {}) {
     readReference: createReadReferenceTool(references),
     readSkill: createReadSkillTool(skills)
   };
+
+  if (!policy) return base;
+
+  // Gate only the consequential tools; read-only tools stay exempt.
+  const CONSEQUENTIAL = ["executeAux4", "writeFile", "editFile", "removeFiles", "createDirectory", "saveImage"];
+  for (const name of CONSEQUENTIAL) {
+    base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
+  }
+  return base;
 }
 
 const Tools = {

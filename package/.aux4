@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Ask your question",
@@ -220,6 +220,21 @@
                 "name": "skills",
                 "text": "Path to the skills directory",
                 "default": ".agents/skills"
+              },
+              {
+                "name": "policy",
+                "text": "Optional policy guardrails: a path to a hash-pinned policy file (comma-separated for layers) or an inline JSON object with budget/allow/deny/escalate",
+                "default": ""
+              },
+              {
+                "name": "runId",
+                "text": "Optional run identifier injected into escalation commands",
+                "default": ""
+              },
+              {
+                "name": "costs",
+                "text": "Optional cost rates as JSON (costIn, costOut, costCache per 1M tokens) used for the policy usd budget",
+                "default": "{}"
               },
               {
                 "name": "question",
@@ -526,6 +541,81 @@
                 "name": "models",
                 "text": "Models registry as JSON",
                 "default": "{}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "execute": [
+            "profile:ai:agent:policy"
+          ],
+          "help": {
+            "text": "Policy guardrail utilities (check decisions, resolve escalations)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ai:agent:policy",
+      "commands": [
+        {
+          "name": "check",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs policy-check values(policy, tool, action, usage, calls)"
+          ],
+          "help": {
+            "text": "Dry-run a policy decision for a tool/action without running anything",
+            "variables": [
+              {
+                "name": "policy",
+                "text": "Policy file path (comma-separated for layers) or inline JSON object",
+                "default": ""
+              },
+              {
+                "name": "tool",
+                "text": "The tool name to check (e.g. executeAux4, writeFile, removeFiles)"
+              },
+              {
+                "name": "action",
+                "text": "The action subject: a command for executeAux4, or a file path for file tools",
+                "default": "",
+                "arg": true
+              },
+              {
+                "name": "usage",
+                "text": "Token usage snapshot as JSON (input, output, cached, total)",
+                "default": "{}"
+              },
+              {
+                "name": "calls",
+                "text": "Consequential tool call count so far",
+                "default": "0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "resolve",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs policy-resolve values(id, decision)"
+          ],
+          "help": {
+            "text": "Resolve a parked (block-mode) policy escalation",
+            "variables": [
+              {
+                "name": "id",
+                "text": "The escalation id to resolve",
+                "arg": true
+              },
+              {
+                "name": "decision",
+                "text": "The decision",
+                "options": [
+                  "allow_once",
+                  "widen",
+                  "stop"
+                ]
               }
             ]
           }
