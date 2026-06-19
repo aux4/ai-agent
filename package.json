@@ -57,7 +57,6 @@
     "@smithy/util-utf8": "^2.0.0",
     "colors": "^1.4.0",
     "d3-dsv": "^2.0.0",
-    "js-yaml": "^4.2.0",
     "langchain": "^1.0.2",
     "mammoth": "^1.11.0",
     "mime-types": "^3.0.1",

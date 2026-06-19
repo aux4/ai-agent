@@ -1,8 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import crypto from "node:crypto";
-import yaml from "js-yaml";
 import { parsePattern, matchesPattern } from "./PatternUtils.js";
 import { runEscalation } from "./Escalation.js";
 
@@ -19,22 +14,13 @@ export const CONSEQUENTIAL_TOOLS = new Set([
   "saveImage"
 ]);
 
-// Where the approved hash pin for a referenced policy file lives. The pin file sits
-// next to the policy file as "<policy>.sha256" and contains the approved sha256 hex.
-// Operators write it once when they approve a policy; a self-improving agent cannot
-// (its write scope excludes the policy file's directory). A mismatch fails closed.
-function pinPathFor(policyFile) {
-  return `${policyFile}.sha256`;
-}
-
-function sha256(content) {
-  return crypto.createHash("sha256").update(content).digest("hex");
-}
-
-function expandTilde(p) {
-  if (p === "~") return os.homedir();
-  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
-  return p;
+// Generate a stable, meaningful run id when the caller does not supply one. Used so
+// ${runId} in escalation commands and the history run reference is always populated.
+// Shape: run_<base36 timestamp>_<short random suffix>.
+export function generateRunId() {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `run_${ts}_${rand}`;
 }
 
 // Extract the policy-relevant keys from a parsed object. Accepts either a bare
@@ -62,98 +48,6 @@ function indexRules(list) {
   return map;
 }
 
-// Narrowing merge of two policy layers. The base is the more-trusted layer; the
-// incoming layer may only tighten. deny = union, allow = intersection,
-// budget = min. Returns the resolved (narrower) policy.
-export function narrowMerge(base, incoming) {
-  const result = { allow: [], deny: [], budget: {}, escalate: [] };
-
-  const baseDeny = indexRules(base.deny);
-  const incDeny = indexRules(incoming.deny);
-  result.deny = unionRules(baseDeny, incDeny);
-
-  const baseAllow = indexRules(base.allow);
-  const incAllow = indexRules(incoming.allow);
-  result.allow = intersectAllow(base.allow, incoming.allow, baseAllow, incAllow);
-
-  result.budget = minBudget(base.budget || {}, incoming.budget || {});
-
-  // escalate rules accumulate (more triggers covered = tighter oversight)
-  result.escalate = [...(base.escalate || []), ...(incoming.escalate || [])];
-
-  return result;
-}
-
-function unionRules(a, b) {
-  const tools = new Set([...Object.keys(a), ...Object.keys(b)]);
-  const out = [];
-  for (const tool of tools) {
-    const patterns = Array.from(new Set([...(a[tool] || []), ...(b[tool] || [])]));
-    out.push({ [tool]: patterns });
-  }
-  return out;
-}
-
-// allow intersection: a tool is allowed by the resolved layer only if it appears in
-// BOTH layers' allow lists (when both constrain it). If only one layer constrains a
-// tool, that constraint applies (the other layer placed no allow-restriction on it).
-function intersectAllow(baseList, incList, baseMap, incMap) {
-  // No allow constraints anywhere -> no allow narrowing.
-  if ((!baseList || baseList.length === 0) && (!incList || incList.length === 0)) return [];
-  const tools = new Set([...Object.keys(baseMap), ...Object.keys(incMap)]);
-  const out = [];
-  for (const tool of tools) {
-    const inBase = baseMap[tool];
-    const inInc = incMap[tool];
-    if (inBase && inInc) {
-      // both constrain -> intersection of patterns
-      const set = new Set(inBase);
-      const patterns = inInc.filter(p => set.has(p));
-      out.push({ [tool]: patterns });
-    } else if (inBase) {
-      out.push({ [tool]: inBase });
-    } else if (inInc) {
-      out.push({ [tool]: inInc });
-    }
-  }
-  return out;
-}
-
-function minBudget(a, b) {
-  const out = {};
-  for (const key of ["tokens", "usd", "calls"]) {
-    const va = a[key];
-    const vb = b[key];
-    if (va != null && vb != null) out[key] = Math.min(va, vb);
-    else if (va != null) out[key] = va;
-    else if (vb != null) out[key] = vb;
-  }
-  return out;
-}
-
-// Verify the resolved policy is not looser than the base on security keys.
-// Returns null if ok, or a reason string if it is looser (fail closed).
-export function checkNotLooser(base, resolved) {
-  // budget: resolved must be <= base for each declared cap
-  for (const key of ["tokens", "usd", "calls"]) {
-    const b = base.budget && base.budget[key];
-    const r = resolved.budget && resolved.budget[key];
-    if (b != null && (r == null || r > b)) {
-      return `resolved budget.${key} (${r}) is looser than base (${b})`;
-    }
-  }
-  // deny: every base deny pattern must still be present in resolved deny
-  const baseDeny = indexRules(base.deny);
-  const resDeny = indexRules(resolved.deny);
-  for (const [tool, patterns] of Object.entries(baseDeny)) {
-    const resPatterns = new Set(resDeny[tool] || []);
-    for (const p of patterns) {
-      if (!resPatterns.has(p)) return `resolved deny dropped "${tool}: ${p}" present in base`;
-    }
-  }
-  return null;
-}
-
 export class PolicyError extends Error {
   constructor(message) {
     super(message);
@@ -162,82 +56,34 @@ export class PolicyError extends Error {
 }
 
 export class Policy {
-  // spec: string (path) | object (inline) | array of (string|object) layers.
+  // resolved: { allow, deny, budget, escalate }
   // options: { staticPermissions, costs: {costIn, costOut, costCache}, agent, runId }
   constructor(resolved, options = {}) {
     this.allow = indexRules(resolved.allow);
     this.deny = indexRules(resolved.deny);
     this.budget = resolved.budget || {};
     this.escalate = resolved.escalate || [];
-    this.failClosedReason = resolved._failClosedReason || null;
     this.staticPermissions = options.staticPermissions || null;
     this.costs = options.costs || {};
     this.agent = options.agent || "agent";
-    this.runId = options.runId || "";
-    this.policyRef = options.policyRef || "";
+    // Auto-generate a run id when none is provided so ${runId} is always meaningful.
+    this.runId = options.runId || generateRunId();
     this.escalationOptions = options.escalationOptions || {};
     this.decisions = [];
   }
 
-  // Build a Policy from a spec. Throws PolicyError on hash mismatch / load errors,
-  // OR (when failClosed) returns a Policy whose every decision is deny.
+  // Build a Policy from an inline policy object. aux4 delivers a config.yaml object
+  // param as a JSON string for free, so callers JSON.parse before reaching here.
+  // Accepts a bare policy object or a {config:{...}}/{policy:{...}} wrapper.
   static load(spec, options = {}) {
-    const layers = Array.isArray(spec) ? spec : [spec];
-    let resolved = { allow: [], deny: [], budget: {}, escalate: [] };
-    let policyRef = "";
-
-    for (let i = 0; i < layers.length; i++) {
-      const layer = layers[i];
-      let parsed;
-
-      if (typeof layer === "string") {
-        const file = path.resolve(expandTilde(layer));
-        policyRef = policyRef || layer;
-        if (!fs.existsSync(file)) {
-          return Policy._failClosed(`policy file not found: ${layer}`, options, policyRef);
-        }
-        const content = fs.readFileSync(file, "utf-8");
-        const pinFile = pinPathFor(file);
-        if (!fs.existsSync(pinFile)) {
-          return Policy._failClosed(`no approved hash pin for policy "${layer}" (expected ${path.basename(pinFile)})`, options, policyRef);
-        }
-        const approved = fs.readFileSync(pinFile, "utf-8").trim().split(/\s+/)[0];
-        const actual = sha256(content);
-        if (approved !== actual) {
-          return Policy._failClosed(`policy hash mismatch for "${layer}" (approved ${approved.slice(0, 12)}…, got ${actual.slice(0, 12)}…)`, options, policyRef);
-        }
-        parsed = extractPolicy(parseContent(content, file));
-      } else if (layer && typeof layer === "object") {
-        parsed = extractPolicy(layer);
-      } else {
-        continue;
-      }
-
-      const layerPolicy = {
-        allow: parsed.allow || [],
-        deny: parsed.deny || [],
-        budget: parsed.budget || {},
-        escalate: parsed.escalate || []
-      };
-
-      if (i === 0) {
-        resolved = layerPolicy;
-      } else {
-        const merged = narrowMerge(resolved, layerPolicy);
-        const looser = checkNotLooser(resolved, merged);
-        if (looser) {
-          return Policy._failClosed(`policy layer ${i} would loosen guardrails: ${looser}`, options, policyRef);
-        }
-        resolved = merged;
-      }
-    }
-
-    return new Policy(resolved, { ...options, policyRef });
-  }
-
-  static _failClosed(reason, options, policyRef) {
-    const resolved = { allow: [], deny: [], budget: {}, escalate: [], _failClosedReason: reason };
-    return new Policy(resolved, { ...options, policyRef });
+    const parsed = extractPolicy(spec && typeof spec === "object" ? spec : {});
+    const resolved = {
+      allow: parsed.allow || [],
+      deny: parsed.deny || [],
+      budget: parsed.budget || {},
+      escalate: parsed.escalate || []
+    };
+    return new Policy(resolved, options);
   }
 
   // Compute the subject string that allow/deny patterns match against for a tool.
@@ -291,11 +137,6 @@ export class Policy {
       return { decision: "allow", reason: "read-only tool (exempt)", action, spend };
     }
 
-    // Fail closed: a referenced policy that did not verify denies everything.
-    if (this.failClosedReason) {
-      return { decision: "deny", reason: this.failClosedReason, trigger: "hash_mismatch", action, spend };
-    }
-
     const subject = this.subjectFor(toolName, args);
 
     // Budget first.
@@ -316,7 +157,7 @@ export class Policy {
       };
     }
 
-    // Policy deny (union of all layers) — narrows below static permissions.
+    // Policy deny — narrows below static permissions.
     if (this.deny[toolName] && this.matchAny(this.deny[toolName], subject)) {
       return {
         decision: "deny",
@@ -364,7 +205,6 @@ export class Policy {
           trigger: outcome.trigger,
           reason: outcome.reason,
           agent: this.agent,
-          policy: this.policyRef,
           runId: this.runId,
           action: outcome.action,
           spent: outcome.spend ? outcome.spend.tokens : 0,
@@ -416,15 +256,6 @@ export class Policy {
     delete this._byCallId[callId];
     return rec || null;
   }
-}
-
-function parseContent(content, file) {
-  const ext = path.extname(file).toLowerCase();
-  if (ext === ".json") {
-    return JSON.parse(content);
-  }
-  // YAML (covers .yaml/.yml and any other extension)
-  return yaml.load(content);
 }
 
 export default Policy;

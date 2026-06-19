@@ -2,7 +2,8 @@
 
 Deterministic checks of the policy guardrail engine via `aux4 ai agent policy check`
 and `aux4 ai agent policy resolve`. These do not call an LLM — they exercise the
-decision logic directly.
+decision logic directly. The `--policy` value is an inline policy object passed as a
+JSON string.
 
 ## inline policy decisions
 
@@ -46,7 +47,7 @@ aux4 ai agent policy check "secret.txt" --tool readFile --policy '{"deny":[{"rea
 "decision":"allow"*"read-only tool (exempt)"
 ```
 
-### should deny a write outside the allowed path
+### should deny a write outside the allowed path (permission narrowing)
 
 ```execute
 aux4 ai agent policy check "/etc/passwd" --tool writeFile --policy '{"allow":[{"writeFile":["digest/*"]}]}'
@@ -98,102 +99,59 @@ aux4 ai agent policy check "out.txt" --tool writeFile --policy '{"budget":{"toke
 "decision":"allow"
 ```
 
-## narrowing merge (layered policies)
-
-### should enforce the tighter budget (min) when layers compose
+### should deny when the usd budget is exceeded using --costs rates
 
 ```execute
-aux4 ai agent policy check "out.txt" --tool writeFile --policy '[{"budget":{"tokens":1000}},{"budget":{"tokens":200}}]' --usage '{"total":300}'
+aux4 ai agent policy check "out.txt" --tool writeFile --policy '{"budget":{"usd":0.01}}' --usage '{"input":1000000,"output":1000000,"total":2000000}' --costs '{"costIn":1,"costOut":1}'
 ```
 
 ```expect:partial
 "decision":"deny"*"trigger":"budget_exceeded"
 ```
 
-### should keep a deny added by a lower layer (deny union)
+## runId auto-generation
+
+### should auto-generate a non-empty runId when none is provided
 
 ```execute
-aux4 ai agent policy check "rm -rf /" --tool executeAux4 --policy '[{"deny":[{"executeAux4":["db *"]}]},{"deny":[{"executeAux4":["rm *"]}]}]'
+aux4 ai agent policy check "github list" --tool executeAux4 --policy '{"allow":[{"executeAux4":["github *"]}]}'
 ```
 
 ```expect:partial
-"decision":"deny"*"trigger":"denied_action"
+"runId":"run_*"
 ```
 
-### should remove capability dropped by a lower layer (allow intersection)
+### should populate runId in an escalated (notify) decision when no runId is passed
 
 ```execute
-aux4 ai agent policy check "email send x" --tool executeAux4 --policy '[{"allow":[{"executeAux4":["github *","email *"]}]},{"allow":[{"executeAux4":["github *"]}]}]'
+aux4 ai agent policy check "db delete users" --tool executeAux4 --policy '{"deny":[{"executeAux4":["* delete *"]}],"escalate":[{"on":["denied_action"],"mode":"notify"}]}'
 ```
 
 ```expect:partial
-"decision":"deny"
+"decision":"escalate"*"runId":"run_*"
 ```
 
-## hash-pinned policy files (immutability, fail closed)
-
-```beforeAll
-mkdir -p policy-fixtures
-printf 'config:\n  deny:\n    - executeAux4: ["* delete *"]\n' > policy-fixtures/test.policy.yaml
-```
-
-```afterAll
-rm -rf policy-fixtures
-```
-
-### should deny everything when no hash pin exists
+### should keep an explicitly provided runId
 
 ```execute
-aux4 ai agent policy check "out.txt" --tool writeFile --policy policy-fixtures/test.policy.yaml
+aux4 ai agent policy check "github list" --tool executeAux4 --policy '{"allow":[{"executeAux4":["github *"]}]}' --runId my-run-123
 ```
 
 ```expect:partial
-"decision":"deny"*"trigger":"hash_mismatch"
+"runId":"my-run-123"
 ```
 
-### should deny everything when the hash pin does not match
+## escalation
 
-```beforeEach
-echo "deadbeef" > policy-fixtures/test.policy.yaml.sha256
-```
+### should escalate a denied action via a notify rule
 
 ```execute
-aux4 ai agent policy check "out.txt" --tool writeFile --policy policy-fixtures/test.policy.yaml
+aux4 ai agent policy check "db delete users" --tool executeAux4 --policy '{"deny":[{"executeAux4":["* delete *"]}],"escalate":[{"on":["denied_action"],"mode":"notify"}]}'
 ```
 
 ```expect:partial
-"decision":"deny"*"trigger":"hash_mismatch"
+"decision":"escalate"*"escalationId":"esc_*"
 ```
-
-### should enforce normally when the hash pin matches
-
-```beforeEach
-shasum -a 256 policy-fixtures/test.policy.yaml | awk '{print $1}' > policy-fixtures/test.policy.yaml.sha256
-```
-
-```execute
-aux4 ai agent policy check "github list" --tool executeAux4 --policy policy-fixtures/test.policy.yaml
-```
-
-```expect:partial
-"decision":"allow"
-```
-
-### should still apply the deny from a correctly pinned file
-
-```beforeEach
-shasum -a 256 policy-fixtures/test.policy.yaml | awk '{print $1}' > policy-fixtures/test.policy.yaml.sha256
-```
-
-```execute
-aux4 ai agent policy check "db delete x" --tool executeAux4 --policy policy-fixtures/test.policy.yaml
-```
-
-```expect:partial
-"decision":"deny"*"trigger":"denied_action"
-```
-
-## escalation resolve
 
 ### should resolve a parked escalation with allow_once
 

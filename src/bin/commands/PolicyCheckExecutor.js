@@ -1,22 +1,22 @@
 import { Policy } from "../../lib/Policy.js";
 
-// Deterministic policy decision check — does NOT run any tool or LLM. Operators and
-// tests use it to verify what a policy would decide for a given tool/action and spend
-// snapshot. Escalation rules are NOT fired here (this is a dry check).
+// Policy decision check for a given tool/action and spend snapshot. Does NOT call an
+// LLM. When the policy has an escalate rule matching the resulting trigger, the
+// escalation is fired (notify) and the parked/notified outcome is reflected — this is
+// how operators and tests exercise the escalation path (including ${runId} injection)
+// deterministically. When no runId is supplied, the policy auto-generates one.
 export async function policyCheckExecutor(params) {
-  const { tool, action = "", policy: policySpec, usage = {}, calls = 0 } = params;
+  const { tool, action = "", policy: policySpec, usage = {}, calls = 0, runId = "", costs = {} } = params;
 
   if (!tool) {
     console.error("Error: --tool is required");
     process.exit(1);
   }
 
-  let spec = policySpec;
-  if (typeof policySpec === "string" && policySpec.includes(",")) {
-    spec = policySpec.split(",").map(s => s.trim()).filter(Boolean);
-  }
-
-  const policy = Policy.load(spec, {});
+  const policy = Policy.load(policySpec || {}, {
+    runId: runId || undefined,
+    costs: typeof costs === "object" ? costs : {}
+  });
 
   // Build args matching the tool's subject extraction.
   const args = {};
@@ -26,16 +26,22 @@ export async function policyCheckExecutor(params) {
 
   const normalizedUsage = typeof usage === "object" ? usage : {};
   const callCount = parseInt(calls) || 0;
-  const outcome = policy.decide(tool, args, normalizedUsage, callCount);
+
+  // enforce() runs the decision and fires any matching escalation rule, so ${runId}
+  // and the escalation command are exercised. It records the decision and returns the
+  // blocked/allow outcome.
+  const result = await policy.enforce(tool, args, normalizedUsage, callCount, null);
+  const decision = result.decision;
 
   const out = {
     tool,
     action,
-    decision: outcome.decision,
-    reason: outcome.reason
+    decision: decision.decision,
+    reason: decision.reason
   };
-  if (outcome.trigger) out.trigger = outcome.trigger;
-  out.spend = outcome.spend;
+  if (decision.trigger) out.trigger = decision.trigger;
+  if (decision.escalationId) out.escalationId = decision.escalationId;
+  out.runId = policy.runId;
 
   console.log(JSON.stringify(out));
 }

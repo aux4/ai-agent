@@ -54,8 +54,8 @@ Key variables (from the package help):
 - storage (default: .llm) — the storage directory for the vector store.
 - stream (default: "false") — enable streaming output (tokens are printed as they arrive).
 - permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
-- policy (default: "") — optional guardrail policy: a path to a hash-pinned policy file (comma-separated for layered files) or an inline JSON object with `budget`/`allow`/`deny`/`escalate` (see [Policy Guardrails](#policy-guardrails)).
-- runId (default: "") — optional run identifier injected into escalation commands as `${runId}`.
+- policy (default: "") — optional guardrail policy as an inline object with `budget`/`allow`/`deny`/`escalate`, delivered as JSON (see [Policy Guardrails](#policy-guardrails)).
+- runId (default: "") — optional run identifier injected into escalation commands as `${runId}`; auto-generated when empty.
 - costs (default: "{}") — optional cost rates as JSON (`costIn`, `costOut`, `costCache` per 1M tokens) used for the policy `usd` budget.
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
@@ -690,7 +690,7 @@ A policy can only **narrow**: the effective permission for a tool is the static 
 
 ### Configuration
 
-The `policy` value is polymorphic — either an inline JSON object or a path to a policy file (comma-separated for layered files):
+The `policy` value is an inline policy object with `budget`/`allow`/`deny`/`escalate` keys. Define it in a config file and pass it with `--config` — aux4 delivers the object to the command as JSON automatically:
 
 ```yaml
 config:
@@ -706,7 +706,7 @@ config:
       - executeAux4: ["* delete *", "db *"]
       - removeFiles: ["**"]
     escalate:
-      - on: [budget_exceeded, hash_mismatch]
+      - on: [budget_exceeded]
         mode: block
         command: "email send --to ops@example.com --subject 'Agent ${agent}: ${trigger}' --body '${reason} (resolve: ${escalationId})'"
       - on: [denied_action]
@@ -738,39 +738,19 @@ Before a consequential tool runs, the policy decides:
 
 - **allow** — the tool runs.
 - **deny** — the tool does not run; the model receives a short adaptive result like `⛔ policy denied: <reason>. Choose another approach.` so it can pick a different path. Triggers: `denied_action` (allow/deny rule) or `budget_exceeded`.
-- **escalate** — when a `deny`/`budget_exceeded`/`hash_mismatch` trigger matches an `escalate` rule (see below).
+- **escalate** — when a `denied_action`/`budget_exceeded` trigger matches an `escalate` rule (see below).
 
 ### Budget
 
 The budget reads the **live accumulated token usage** the run already maintains plus the consequential tool call count — there is no separate ledger. Set `costs` (per-1M rates) to enable the `usd` cap. Exceeding any declared cap denies further consequential tools with the `budget_exceeded` trigger.
 
-### Immutability (hash-pinned, fail closed)
+### Run identifier
 
-When `policy` references a file, the file's SHA-256 is verified against an **approved pin** stored next to it as `<policy-file>.sha256`. An operator writes the pin once when they approve a policy:
-
-```bash
-shasum -a 256 triage.policy.yaml | awk '{print $1}' > triage.policy.yaml.sha256
-```
-
-If the pin is missing or the hash does not match, the policy **fails closed** — every consequential tool is denied (trigger `hash_mismatch`). A self-improving agent cannot widen its own bounds: a mutated policy fails verification, and only a human re-approving updates the pin. Keep referenced policy files (and their pins) outside the agent's write scope.
-
-### Layering (narrowing merge)
-
-Policy files can be composed (e.g. assembled with `aux4 config merge`) and passed as a comma-separated list. Resolution is monotonic-narrowing — a lower layer may only tighten:
-
-- `deny` → **union** (lower layers can only add)
-- `allow` → **intersection** (lower layers can only remove capabilities)
-- `budget` → **min** (lower layers can only tighten)
-
-If a resolved layer would come out **looser** than the base, resolution fails closed.
-
-```bash
-aux4 ai agent ask "..." --config --policy "org.policy.yaml,team.policy.yaml,triage.policy.yaml"
-```
+Each policy-enforced run has a `runId` that is injected into escalation commands as `${runId}`. If you do not pass `--runId`, a stable one is generated automatically (e.g. `run_<timestamp>_<suffix>`) so `${runId}` is always meaningful.
 
 ### Escalation
 
-Each `escalate` rule is `{ on: [triggers], mode: block|notify, command: "<any aux4 command>" }`. The `command` is any aux4 command with these variables injected: `${trigger} ${reason} ${agent} ${policy} ${runId} ${action} ${spent} ${cap} ${escalationId} ${json}` (`${json}` is the full context blob for queue payloads).
+Each `escalate` rule is `{ on: [triggers], mode: block|notify, command: "<any aux4 command>" }`. The `command` is any aux4 command with these variables injected: `${trigger} ${reason} ${agent} ${runId} ${action} ${spent} ${cap} ${escalationId} ${json}` (`${json}` is the full context blob for queue payloads).
 
 - **notify** — fires the command and continues (the triggering action stays denied).
 - **block** — fires the command, parks the run, and waits for a decision. A human or an automated approver resolves it:
@@ -795,7 +775,7 @@ aux4 ai agent policy check "db delete users" --tool executeAux4 \
 ```
 
 ```json
-{"tool":"executeAux4","action":"db delete users","decision":"deny","reason":"policy denies executeAux4 \"db delete users\"","trigger":"denied_action","spend":{"tokens":0,"usd":0,"calls":0}}
+{"tool":"executeAux4","action":"db delete users","decision":"deny","reason":"policy denies executeAux4 \"db delete users\"","trigger":"denied_action","runId":"run_lq3k8z_a1b2c3"}
 ```
 
 ---

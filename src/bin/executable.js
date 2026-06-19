@@ -28,21 +28,16 @@ import { policyResolveExecutor } from "./commands/PolicyResolveExecutor.js";
 
 process.title = "aux4-agent";
 
-// The policy argument is polymorphic: a path string (or comma list of layer paths)
-// OR an inline JSON object/array. Detect JSON by a leading "{" or "[". An empty value
-// (or "{}") means "no policy". Inline JSON is parsed as-is (commas belong to the JSON);
-// only path strings are comma-split into layers downstream.
+// The policy argument is an inline policy object delivered as a JSON string. aux4
+// auto-converts a config.yaml object param into a JSON string for free, so we simply
+// JSON.parse it. An empty value (or "{}") means "no policy".
 function parsePolicyArg(value) {
-  if (!value || value.trim() === "" || value.trim() === "{}") return "";
-  const trimmed = value.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return trimmed;
-    }
+  if (!value || value.trim() === "" || value.trim() === "{}") return null;
+  try {
+    return JSON.parse(value.trim());
+  } catch {
+    return null;
   }
-  return trimmed;
 }
 
 (async () => {
@@ -155,7 +150,9 @@ function parsePolicyArg(value) {
         tool: args[2],
         action: args[3] || "",
         usage: JSON.parse(args[4] || "{}"),
-        calls: args[5] || "0"
+        calls: args[5] || "0",
+        runId: args[6] || "",
+        costs: JSON.parse(args[7] || "{}")
       });
     } else if (command === "policy-resolve") {
       await policyResolveExecutor({

@@ -223,12 +223,12 @@
               },
               {
                 "name": "policy",
-                "text": "Optional policy guardrails: a path to a hash-pinned policy file (comma-separated for layers) or an inline JSON object with budget/allow/deny/escalate",
+                "text": "Optional policy guardrails as an inline object (budget/allow/deny/escalate), delivered as JSON",
                 "default": ""
               },
               {
                 "name": "runId",
-                "text": "Optional run identifier injected into escalation commands",
+                "text": "Optional run identifier injected into escalation commands (auto-generated when empty)",
                 "default": ""
               },
               {
@@ -562,14 +562,14 @@
         {
           "name": "check",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs policy-check values(policy, tool, action, usage, calls)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs policy-check values(policy, tool, action, usage, calls, runId, costs)"
           ],
           "help": {
-            "text": "Dry-run a policy decision for a tool/action without running anything",
+            "text": "Check a policy decision for a tool/action against a spend snapshot",
             "variables": [
               {
                 "name": "policy",
-                "text": "Policy file path (comma-separated for layers) or inline JSON object",
+                "text": "Inline policy object (budget/allow/deny/escalate) delivered as JSON",
                 "default": ""
               },
               {
@@ -591,6 +591,16 @@
                 "name": "calls",
                 "text": "Consequential tool call count so far",
                 "default": "0"
+              },
+              {
+                "name": "runId",
+                "text": "Run identifier injected into escalation commands (auto-generated when empty)",
+                "default": ""
+              },
+              {
+                "name": "costs",
+                "text": "Cost rates as JSON (costIn, costOut, costCache per 1M tokens) for the usd budget",
+                "default": "{}"
               }
             ]
           }
