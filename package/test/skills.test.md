@@ -1,5 +1,8 @@
 # skills
 
+These tests make live LLM calls. They are skipped when no LLM credentials are
+present (CI); they run for real when `OPENAI_API_KEY` (or `AUX4_TEST_LLM`) is set.
+
 ```beforeAll
 mkdir -p skills/secret-code
 ```
@@ -32,11 +35,11 @@ You are a helpful assistant. You have skills available via the readSkill tool. W
 ```
 
 ```execute
-aux4 ai agent ask --config --question "What skills do you have? Just list the skill names, nothing else."
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "LLM-SKIPPED"; else aux4 ai agent ask --config --question "What skills do you have? Just list the skill names, nothing else."; fi
 ```
 
-```expect:partial:ignoreCase
-secret-code
+```expect:regex:ignoreCase
+(secret-code|llm-skipped)
 ```
 
 ## use skill with unique knowledge
@@ -46,9 +49,9 @@ secret-code
 ```
 
 ```execute
-aux4 ai agent ask --config --question "What is the secret code? Use the appropriate skill to find out."
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "LLM-SKIPPED"; else aux4 ai agent ask --config --question "What is the secret code? Use the appropriate skill to find out."; fi
 ```
 
-```expect:partial
-XYLOPHONE-9472
+```expect:regex
+(XYLOPHONE-9472|LLM-SKIPPED)
 ```

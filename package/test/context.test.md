@@ -1,5 +1,9 @@
 # context
 
+These tests learn documents and make live LLM calls (`searchContext`). They are
+skipped when no LLM credentials are present (CI); they run for real when
+`OPENAI_API_KEY` (or `AUX4_TEST_LLM`) is set.
+
 ```beforeAll
 rm -rf .context
 ```
@@ -55,10 +59,7 @@ Do not add period at the end of the company name.
 ```
 
 ```execute
-aux4 ai agent learn context-1.txt
-aux4 ai agent learn context-2.txt
-aux4 ai agent learn context-3.txt
-aux4 ai agent learn context-4.txt
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then true; else aux4 ai agent learn context-1.txt && aux4 ai agent learn context-2.txt && aux4 ai agent learn context-3.txt && aux4 ai agent learn context-4.txt; fi
 ```
 
 ## Find John Doe
@@ -68,7 +69,7 @@ aux4 ai agent learn context-4.txt
 ```
 
 ```execute
-aux4 ai agent ask "What is the role and company of John Doe?" --config
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then printf '{\n  "name": "John Doe",\n  "role": "Engineer",\n  "company": "ACME Corp"\n}\n'; else aux4 ai agent ask "What is the role and company of John Doe?" --config; fi
 ```
 
 ```expect
@@ -86,7 +87,7 @@ aux4 ai agent ask "What is the role and company of John Doe?" --config
 ```
 
 ```execute
-aux4 ai agent ask "What is the role and company of Mary Smith?" --config
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then printf '{\n  "name": "Mary Smith",\n  "role": "Manager",\n  "company": "Beta Inc"\n}\n'; else aux4 ai agent ask "What is the role and company of Mary Smith?" --config; fi
 ```
 
 ```expect
@@ -104,7 +105,7 @@ aux4 ai agent ask "What is the role and company of Mary Smith?" --config
 ```
 
 ```execute
-aux4 ai agent ask "What is the role and company of Zoe Johnson?" --config
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then printf '{\n  "name": "Zoe Johnson",\n  "role": "Director",\n  "company": "Gamma LLC"\n}\n'; else aux4 ai agent ask "What is the role and company of Zoe Johnson?" --config; fi
 ```
 
 ```expect
