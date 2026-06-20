@@ -54,6 +54,9 @@ Key variables (from the package help):
 - storage (default: .llm) — the storage directory for the vector store.
 - stream (default: "false") — enable streaming output (tokens are printed as they arrive).
 - permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
+- policy (default: "") — optional guardrail policy as an inline object with `budget`/`allow`/`deny`/`escalate`, delivered as JSON (see [Policy Guardrails](#policy-guardrails)).
+- runId (default: "") — optional run identifier injected into escalation commands as `${runId}`; auto-generated when empty.
+- costs (default: "{}") — optional cost rates as JSON (`costIn`, `costOut`, `costCache` per 1M tokens) used for the policy `usd` budget.
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
@@ -676,6 +679,104 @@ config:
 ```
 
 **Note:** File permission checks run after the existing path security checks (current directory bounds), adding a second layer of protection.
+
+---
+
+## Policy Guardrails
+
+Policy is an optional, enforced guardrail layer that sits on top of the static permissions. Where permissions are baked into the agent's own config, a policy is a separate, swappable, accountable layer an operator controls without touching the agent. Policy is **opt-in** — with no `--policy` set, behavior is unchanged.
+
+A policy can only **narrow**: the effective permission for a tool is the static permissions **intersected** with the policy. A policy never grants a tool the agent config disabled.
+
+### Configuration
+
+The `policy` value is an inline policy object with `budget`/`allow`/`deny`/`escalate` keys. Define it in a config file and pass it with `--config` — aux4 delivers the object to the command as JSON automatically:
+
+```yaml
+config:
+  policy:
+    budget:
+      tokens: 200000   # per-run token cap
+      usd: 1.00        # per-run cost cap (requires costs rates)
+      calls: 50        # per-run consequential tool call cap
+    allow:
+      - executeAux4: ["github *", "email send *"]
+      - writeFile: ["./digest/**"]
+    deny:
+      - executeAux4: ["* delete *", "db *"]
+      - removeFiles: ["**"]
+    escalate:
+      - on: [budget_exceeded]
+        mode: block
+        command: "email send --to ops@example.com --subject 'Agent ${agent}: ${trigger}' --body '${reason} (resolve: ${escalationId})'"
+      - on: [denied_action]
+        mode: notify
+        command: "queue publish --queue agent-escalations --message '${json}'"
+```
+
+Inline object on the command line:
+
+```bash
+aux4 ai agent ask "summarize the open issues" --config \
+  --policy '{"allow":[{"executeAux4":["github *"]}],"budget":{"tokens":50000}}'
+```
+
+### Enforced tools
+
+Only **consequential** tools are gated; read-only tools (`readFile`, `listFiles`, `searchFiles`, `searchContext`, and the date/reference/skill helpers) are exempt:
+
+| Gated tool | Subject matched by allow/deny patterns |
+|------------|----------------------------------------|
+| `executeAux4` | the aux4 command string |
+| `writeFile`, `editFile`, `saveImage` | the target file path |
+| `removeFiles` | the target path(s) |
+| `createDirectory` | the directory path |
+
+### Decision behavior
+
+Before a consequential tool runs, the policy decides:
+
+- **allow** — the tool runs.
+- **deny** — the tool does not run; the model receives a short adaptive result like `⛔ policy denied: <reason>. Choose another approach.` so it can pick a different path. Triggers: `denied_action` (allow/deny rule) or `budget_exceeded`.
+- **escalate** — when a `denied_action`/`budget_exceeded` trigger matches an `escalate` rule (see below).
+
+### Budget
+
+The budget reads the **live accumulated token usage** the run already maintains plus the consequential tool call count — there is no separate ledger. Set `costs` (per-1M rates) to enable the `usd` cap. Exceeding any declared cap denies further consequential tools with the `budget_exceeded` trigger.
+
+### Run identifier
+
+Each policy-enforced run has a `runId` that is injected into escalation commands as `${runId}`. If you do not pass `--runId`, a stable one is generated automatically (e.g. `run_<timestamp>_<suffix>`) so `${runId}` is always meaningful.
+
+### Escalation
+
+Each `escalate` rule is `{ on: [triggers], mode: block|notify, command: "<any aux4 command>" }`. The `command` is any aux4 command with these variables injected: `${trigger} ${reason} ${agent} ${runId} ${action} ${spent} ${cap} ${escalationId} ${json}` (`${json}` is the full context blob for queue payloads).
+
+- **notify** — fires the command and continues (the triggering action stays denied).
+- **block** — fires the command, parks the run, and waits for a decision. A human or an automated approver resolves it:
+
+```bash
+aux4 ai agent policy resolve <escalationId> --decision allow_once|widen|stop
+```
+
+`allow_once`/`widen` let the parked action proceed; `stop` keeps it denied. An unanswered block escalation stays parked (fail closed, never blows the cap).
+
+### Recording decisions into history
+
+When `--history <file>` is set, each policy decision (allow/deny/escalate + reason) is recorded on the corresponding `tool` entry in the history structure as a `policy` field. This is the same structure used by traces. With no `--history`, the policy is still enforced — it is just not persisted.
+
+### Dry-run check
+
+Verify what a policy would decide without running anything:
+
+```bash
+aux4 ai agent policy check "db delete users" --tool executeAux4 \
+  --policy '{"deny":[{"executeAux4":["* delete *"]}]}'
+```
+
+```json
+{"tool":"executeAux4","action":"db delete users","decision":"deny","reason":"policy denies executeAux4 \"db delete users\"","trigger":"denied_action","runId":"run_lq3k8z_a1b2c3"}
+```
 
 ---
 

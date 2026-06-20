@@ -23,8 +23,22 @@ import { compactExecutor } from "./commands/CompactExecutor.js";
 import { summarizeExecutor } from "./commands/SummarizeExecutor.js";
 import { rememberExecutor } from "./commands/RememberExecutor.js";
 import { modelsExecutor } from "./commands/ModelsExecutor.js";
+import { policyCheckExecutor } from "./commands/PolicyCheckExecutor.js";
+import { policyResolveExecutor } from "./commands/PolicyResolveExecutor.js";
 
 process.title = "aux4-agent";
+
+// The policy argument is an inline policy object delivered as a JSON string. aux4
+// auto-converts a config.yaml object param into a JSON string for free, so we simply
+// JSON.parse it. An empty value (or "{}") means "no policy".
+function parsePolicyArg(value) {
+  if (!value || value.trim() === "" || value.trim() === "{}") return null;
+  try {
+    return JSON.parse(value.trim());
+  } catch {
+    return null;
+  }
+}
 
 (async () => {
   try {
@@ -35,7 +49,7 @@ process.title = "aux4-agent";
 
     if (!command) {
       console.log("Usage: aux4-agent <command> [options]");
-      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact, models");
+      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
       process.exit(1);
     }
 
@@ -82,6 +96,9 @@ process.title = "aux4-agent";
         useModel: args[17] || "",
         references: args[18] || "",
         skills: args[19] || "",
+        policy: parsePolicyArg(args[20]),
+        runId: args[21] || "",
+        costs: JSON.parse(args[22] || "{}"),
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {
@@ -127,9 +144,24 @@ process.title = "aux4-agent";
       await modelsExecutor({
         models: JSON.parse(args[1] || "{}")
       });
+    } else if (command === "policy-check") {
+      await policyCheckExecutor({
+        policy: parsePolicyArg(args[1]),
+        tool: args[2],
+        action: args[3] || "",
+        usage: JSON.parse(args[4] || "{}"),
+        calls: args[5] || "0",
+        runId: args[6] || "",
+        costs: JSON.parse(args[7] || "{}")
+      });
+    } else if (command === "policy-resolve") {
+      await policyResolveExecutor({
+        id: args[1],
+        decision: args[2]
+      });
     } else {
       console.error(`Unknown command: ${command}`.red);
-      console.log("Available commands: learn, search, forget, ask, image, history, summarize, remember, compact, models");
+      console.log("Available commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
       process.exit(1);
     }
   } catch (e) {
