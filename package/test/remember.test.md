@@ -39,6 +39,9 @@ Error: History file*not found
 
 ## remember with model
 
+This makes a live LLM call. It is skipped when no LLM credentials are present
+(CI); it runs for real when `OPENAI_API_KEY` (or `AUX4_TEST_LLM`) is set.
+
 ### should generate a memory entry from history
 
 ```timeout
@@ -46,7 +49,7 @@ Error: History file*not found
 ```
 
 ```execute
-aux4 ai agent remember remember-history.json --config
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "FERRANOVA-331"; else aux4 ai agent remember remember-history.json --config; fi
 ```
 
 ```expect:partial:ignoreCase

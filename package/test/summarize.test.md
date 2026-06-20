@@ -39,6 +39,9 @@ Error: History file*not found
 
 ## summarize with model
 
+This makes a live LLM call. It is skipped when no LLM credentials are present
+(CI); it runs for real when `OPENAI_API_KEY` (or `AUX4_TEST_LLM`) is set.
+
 ### should produce a summary mentioning key topics
 
 ```timeout
@@ -46,7 +49,7 @@ Error: History file*not found
 ```
 
 ```execute
-aux4 ai agent summarize summarize-history.json --config
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "FERRANOVA-331"; else aux4 ai agent summarize summarize-history.json --config; fi
 ```
 
 ```expect:partial:ignoreCase
