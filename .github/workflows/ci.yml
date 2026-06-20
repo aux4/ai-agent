@@ -14,22 +14,39 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Lint package
-        uses: aux4/lint-package-action@v1
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          package_directory: package
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - uses: aux4/action@v1
+        with:
+          command: lint
+          strict: 'true'
 
   test:
+    needs: [lint]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Test package
-        uses: aux4/test-package-action@v1
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          package_directory: package
-          test_directory: test
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - uses: aux4/action@v1
+        with:
+          command: test
+          build_command: npm run build
