@@ -181,7 +181,7 @@ The load order is:
 2. Base instructions (`--baseInstructions`)
 3. Main instructions (`--instructions`)
 
-### Agent Identity (`--bio`)
+### Agent Identity (--bio)
 
 `--bio` accepts a JSON object describing the agent. The recognized fields are `name`, `role`, and `description`. When present, they are rendered as a `# Agent Identity` system section so the agent consistently knows who it is:
 
@@ -217,7 +217,7 @@ config:
     description: Owns the CI/CD pipeline and cuts releases
 ```
 
-### Base Instructions (`--baseInstructions`)
+### Base Instructions (--baseInstructions)
 
 `--baseInstructions` takes a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. Use it for the immutable base-prompt layer — shared discipline and rules that should apply to every run and should not be overridden by the per-task instructions layered on top:
 
