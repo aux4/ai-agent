@@ -45,14 +45,18 @@ Overview:
 Ask a single question to the agent. The agent composes the prompt using an instructions file, optional context, optional images, and retrieves relevant documents from the local vector store when available.
 
 Key variables (from the package help):
+- baseInstructions (default: "") — path to a base instructions file loaded **before** the main instructions; an immutable base-prompt layer (see [Agent Identity & Base Instructions](#agent-identity--base-instructions)).
 - instructions (default: AGENTS.md) — prompt instructions file to shape the assistant. Falls back to AGENT.md then instructions.md if not found.
+- bio (default: "") — agent identity as a JSON object with `name`, `role`, `description`, rendered as a `# Agent Identity` system section (see [Agent Identity & Base Instructions](#agent-identity--base-instructions)).
 - role (default: user) — role used in the prompt.
 - history (default: "") — a history file to seed the conversation.
 - outputSchema (default: schema.json) — path to a JSON file defining the structured output format (see [Output Schema](#output-schema)).
 - context (default: "false") — read additional context from stdin (set to true to pipe context).
 - image (default: "") — path(s) to image(s) to attach (comma-separated if multiple).
-- storage (default: .llm) — the storage directory for the vector store.
+- storage (default: .context) — the storage directory for the vector store.
 - stream (default: "false") — enable streaming output (tokens are printed as they arrive).
+- autoCompact (default: "false") — enable auto-compaction of conversation history when it grows large (see [Conversation Compaction](#conversation-compaction)).
+- compaction (default: "{}") — compaction configuration as JSON (`contextWindow`, `maxContextPercent`, `keepLastMessages`, `model`); see [Conversation Compaction](#conversation-compaction).
 - permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
 - policy (default: "") — optional guardrail policy as an inline object with `budget`/`allow`/`deny`/`escalate`, delivered as JSON (see [Policy Guardrails](#policy-guardrails)).
 - runId (default: "") — optional run identifier injected into escalation commands as `${runId}`; auto-generated when empty.
@@ -101,13 +105,21 @@ An interactive chat loop that sets question text, logs the user input, then dele
 
 Key variables:
 - instructions (default: AGENTS.md)
+- bio (default: "") — agent identity as a JSON object with `name`, `role`, `description` (see [Agent Identity & Base Instructions](#agent-identity--base-instructions)). Chat does not accept `baseInstructions`.
 - role (default: user)
 - history (default: history.json)
 - outputSchema (default: schema.json)
 - context (default: "false")
 - image (default: "")
-- storage (default: .llm)
+- storage (default: .context)
 - model (default: "{}") — model configuration JSON
+- autoCompact (default: "false") — enable auto-compaction of conversation history (see [Conversation Compaction](#conversation-compaction)).
+- compaction (default: "{}") — compaction configuration as JSON (see [Conversation Compaction](#conversation-compaction)).
+- permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
+- models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
+- useModel (default: "") — named model from registry to use for this request.
+- references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
+- skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
 - text (arg: true) — text to send in this chat step
 
 Usage:
@@ -119,14 +131,24 @@ aux4 ai agent chat "Hello, I'd like to start a session" --config
 
 The command logs each user turn and uses the ask pipeline for responses. Typing "exit" ends the loop.
 
+Start a chat with an agent identity that persists across every turn:
+
+```bash
+aux4 ai agent chat "Hi" --config \
+  --bio '{"name":"Ada","role":"release manager","description":"Owns the CI/CD pipeline"}'
+```
+
 For more details see [aux4 ai agent chat](./commands/ai/agent/chat).
 
 ### aux4 ai agent history
 Overview:
-Display a formatted view of conversation history JSON.
+Display a formatted view of conversation history JSON, including tool invocations and token usage. When cost rates are provided, it also reports the estimated cost of the conversation.
 
 Key variables:
 - historyFile (arg: true, default: history.json) — history file to show.
+- costIn (default: "0") — cost per 1M input tokens (e.g. `3.0` for Claude Sonnet).
+- costOut (default: "0") — cost per 1M output tokens (e.g. `15.0` for Claude Sonnet).
+- costCache (default: "0") — cost per 1M cached input tokens (e.g. `0.30` for Claude Sonnet).
 
 Usage example:
 
@@ -136,7 +158,167 @@ aux4 ai agent history
 
 This prints conversation entries in a readable format, including tool invocations.
 
+Show history with cost accounting:
+
+```bash
+aux4 ai agent history history.json --costIn 3.0 --costOut 15.0 --costCache 0.30
+```
+
 For more details see [aux4 ai agent history](./commands/ai/agent/history).
+
+---
+
+## Agent Identity & Base Instructions
+
+The system prompt the agent runs with is assembled in layers. Two flags let you control the top of that prompt independently of the per-task instructions file:
+
+- `--bio` — an **agent identity** (who the agent is).
+- `--baseInstructions` — an **immutable base-prompt layer** (always-on rules, loaded before the task instructions).
+
+The load order is:
+
+1. Agent identity (`--bio`)
+2. Base instructions (`--baseInstructions`)
+3. Main instructions (`--instructions`)
+
+### Agent Identity (--bio)
+
+`--bio` accepts a JSON object describing the agent. The recognized fields are `name`, `role`, and `description`. When present, they are rendered as a `# Agent Identity` system section so the agent consistently knows who it is:
+
+```bash
+aux4 ai agent ask --config \
+  --bio '{"name":"Ada","role":"release manager","description":"Owns the CI/CD pipeline and cuts releases"}' \
+  "Who are you and what is your role?"
+```
+
+```text
+I'm Ada, the release manager. I own the CI/CD pipeline and cut releases.
+```
+
+The identity is injected as a system section like:
+
+```text
+# Agent Identity
+
+**Name:** Ada
+**Role:** release manager
+**Description:** Owns the CI/CD pipeline and cuts releases
+```
+
+An empty or omitted `--bio` adds nothing to the prompt. `--bio` is available on both `ask` and `chat`.
+
+Store the identity in `config.yaml` under a top-level `bio:` key and aux4 delivers it as JSON automatically:
+
+```yaml
+config:
+  bio:
+    name: Ada
+    role: release manager
+    description: Owns the CI/CD pipeline and cuts releases
+```
+
+### Base Instructions (--baseInstructions)
+
+`--baseInstructions` takes a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. Use it for the immutable base-prompt layer — shared discipline and rules that should apply to every run and should not be overridden by the per-task instructions layered on top:
+
+```bash
+aux4 ai agent ask --config \
+  --baseInstructions base-policy.md \
+  --instructions task.md \
+  "Refactor the build script"
+```
+
+`base-policy.md` is loaded first as the base layer, then `task.md` is layered on top. `--baseInstructions` is available on `ask` (not `chat`).
+
+---
+
+## Conversation Compaction
+
+Long-running conversations grow until they no longer fit the model's context window. The agent can automatically compact the history mid-run, and the package also ships standalone commands to summarize, remember, and compact a history file out of band.
+
+### Auto-compaction during a run
+
+Auto-compaction is **opt-in** on `ask` and `chat`. It requires both `--autoCompact true` and a `--compaction` config object with `contextWindow` set. When the prompt tokens exceed the threshold (`contextWindow * maxContextPercent / 100`), older messages are summarized in place while the most recent messages are kept verbatim.
+
+```bash
+aux4 ai agent ask --config \
+  --history history.json \
+  --autoCompact true \
+  --compaction '{"contextWindow":200000,"maxContextPercent":85,"keepLastMessages":6}' \
+  "Continue working on the migration"
+```
+
+Compaction config fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `contextWindow` | *(required)* | Model's context window size in tokens. Auto-compaction is inactive unless this is set. |
+| `maxContextPercent` | `85` | Trigger threshold as a percentage of `contextWindow`. |
+| `keepLastMessages` | `6` | Number of recent messages kept verbatim. |
+| `model` | main model | Optional model config used for the summarization step. |
+
+With `--autoCompact false` (the default), behavior is unchanged and nothing is compacted.
+
+### History & Memory commands
+
+These commands operate on a saved history JSON file. All three accept `--model` (inline model config JSON) or `--useModel <name>` with a `--models` registry to pick the model that does the summarization.
+
+#### aux4 ai agent summarize
+
+Summarize a history file into a detailed markdown document, printed to stdout. The file is not modified, so it is easy to pipe elsewhere (save, learn, store in a knowledge base). Tool call invocations are skipped and only meaningful text is kept.
+
+```bash
+aux4 ai agent summarize history.json --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}' > summary.md
+```
+
+Key variables:
+- historyFile (arg: true, default: history.json) — the history JSON file to summarize.
+- model (default: "{}") — model configuration JSON (required unless `--useModel` is set).
+- models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
+- useModel (default: "") — named model from the registry to use.
+
+#### aux4 ai agent remember
+
+Generate a **concise** memory entry from a history file, printed to stdout. Unlike `summarize` (a detailed document), `remember` produces a short, factual entry — key facts, decisions, outcomes, and preferences — optimized for retrieval and context injection in future sessions. The file is not modified.
+
+```bash
+aux4 ai agent remember history.json --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}'
+```
+
+Store it in a knowledge base for later recall:
+
+```bash
+MEMORY=$(aux4 ai agent remember history.json --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}')
+aux4 kb add "session-2026-06-18" --content "$MEMORY" --tags session,agent
+```
+
+Key variables:
+- historyFile (arg: true, default: history.json) — the history JSON file.
+- model (default: "{}") — model configuration JSON (required unless `--useModel` is set).
+- models (default: "{}") — models registry as JSON.
+- useModel (default: "") — named model from the registry to use.
+
+#### aux4 ai agent compact
+
+Compact a history file in place: older messages are summarized into a single summary while the most recent `--keepLastMessages` are kept verbatim. This is the out-of-band equivalent of auto-compaction — useful for trimming a saved history before resuming. The compacted history is **written back to the file**; the summary content is printed to stdout and progress is reported to stderr.
+
+```bash
+aux4 ai agent compact history.json --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}' --keepLastMessages 10
+```
+
+```text
+Compacting 48 messages...
+Compacted: 48 → 11 messages
+```
+
+Key variables:
+- historyFile (arg: true, default: history.json) — the history JSON file to compact.
+- model (default: "{}") — model configuration JSON (required unless `--useModel` is set).
+- keepLastMessages (default: "6") — number of recent messages to keep verbatim.
+- models (default: "{}") — models registry as JSON.
+- useModel (default: "") — named model from the registry to use.
+
+For more details see [aux4 ai agent summarize](./commands/ai/agent/summarize), [aux4 ai agent remember](./commands/ai/agent/remember), and [aux4 ai agent compact](./commands/ai/agent/compact).
 
 ---
 
@@ -152,10 +334,10 @@ Commands:
 
 ### aux4 ai agent learn
 Overview:
-Index one or more documents into the local storage directory (.llm by default), preparing them for semantic search.
+Index one or more documents into the local storage directory (.context by default), preparing them for semantic search.
 
 Key variables:
-- storage (default: .llm) — the storage directory to write vector store and metadata.
+- storage (default: .context) — the storage directory to write vector store and metadata.
 - doc (arg: true) — file path to the document to learn from.
 - type (default: "") — optional document type.
 
@@ -204,7 +386,7 @@ Result:
 Capital of France is Paris
 
 Notes:
-- Documents are stored in the storage directory (.llm by default). Re-learning the same document will update the indexed content.
+- Documents are stored in the storage directory (.context by default). Re-learning the same document will update the indexed content.
 - Use simple plain text documents for predictable retrieval behavior as shown in the tests.
 
 For more details see [aux4 ai agent learn](./commands/ai/agent/learn).
@@ -214,7 +396,7 @@ Overview:
 Run a query against the local vector store to retrieve relevant text snippets or structured data.
 
 Key variables:
-- storage (default: .llm)
+- storage (default: .context)
 - format (default: text) — "text" or "json"
 - source (default: "") — limit search to a specific source path
 - limit (default: "1") — number of results to return
@@ -239,7 +421,7 @@ Overview:
 Remove the local vector store files to forget learned documents. This is handy in tests or when you want to reset state.
 
 Key variables:
-- storage (default: .llm)
+- storage (default: .context)
 
 Usage:
 

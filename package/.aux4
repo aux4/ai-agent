@@ -182,6 +182,11 @@
                 "default": "false"
               },
               {
+                "name": "model",
+                "text": "Model configuration as JSON (e.g., {\"type\":\"openai\",\"config\":{\"model\":\"gpt-4\"}})",
+                "default": "{}"
+              },
+              {
                 "name": "autoCompact",
                 "text": "Enable auto-compaction of conversation history",
                 "default": "false"
@@ -193,7 +198,7 @@
               },
               {
                 "name": "bio",
-                "text": "Agent bio as JSON (name, role, description, picture)",
+                "text": "Agent bio as JSON (name, role, description)",
                 "default": ""
               },
               {
@@ -344,6 +349,11 @@
                 "default": ".context"
               },
               {
+                "name": "stream",
+                "text": "Enable streaming output",
+                "default": "false"
+              },
+              {
                 "name": "model",
                 "text": "Model configuration as JSON (e.g., {\"type\":\"openai\",\"config\":{\"model\":\"gpt-4\"}})",
                 "default": "{}"
@@ -360,7 +370,7 @@
               },
               {
                 "name": "bio",
-                "text": "Agent bio as JSON (name, role, description, picture)",
+                "text": "Agent bio as JSON (name, role, description)",
                 "default": ""
               },
               {
