@@ -4,6 +4,8 @@ Ask a single question to the AI agent. The agent composes the prompt using an in
 
 Key features:
 
+- **Agent identity** — give the agent a persona with `--bio` (a JSON object with `name`, `role`, `description`); it is rendered as a `# Agent Identity` system section so the agent knows who it is
+- **Base instructions** — prepend an immutable base-prompt layer with `--baseInstructions <file>`, loaded before the main `--instructions` file
 - **Prompt instructions** — load a custom instructions file to shape the assistant's behavior
 - **Context from stdin** — pipe additional context into the prompt with `--context true`
 - **Image input** — attach one or more images for visual question answering
@@ -20,10 +22,12 @@ Key features:
 #### Usage
 
 ```bash
-aux4 ai agent ask [--instructions <file>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
 ```
 
+--baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
 --instructions   Prompt instructions file (default: AGENTS.md; falls back to AGENT.md then instructions.md if not found)
+--bio            Agent identity as a JSON object with name, role, description — rendered as a `# Agent Identity` system section (default: "")
 --role           Role used in the prompt (default: user)
 --history        History JSON file for multi-turn conversations (default: "")
 --outputSchema   JSON schema file to constrain structured output (default: schema.json)
@@ -54,6 +58,10 @@ Compaction config fields:
 - `maxContextPercent` — trigger threshold as percentage (default: 85)
 - `keepLastMessages` — recent messages to keep verbatim (default: 6)
 - `model` — optional model config for summarization (defaults to main model)
+
+**Agent identity (`--bio`):** Pass a JSON object describing who the agent is. The recognized fields are `name`, `role`, and `description`. When present, they are rendered as a `# Agent Identity` system section (bold `**Name:**` / `**Role:**` / `**Description:**` lines) and injected at the top of the system prompt — above the base instructions and the main instructions — so the agent consistently knows its persona. An empty or omitted `--bio` adds nothing. When stored in a config file under a top-level `bio:` key, aux4 delivers it as JSON automatically.
+
+**Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).
 
 **Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand using the `readSkill` tool. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
 
@@ -111,6 +119,29 @@ aux4 ai agent ask "Clean up the open issues" --config \
 ```
 
 If the agent attempts a denied or over-budget action, it receives a `⛔ policy ...` result and adapts.
+
+With an agent identity (`--bio`):
+
+```bash
+aux4 ai agent ask --config \
+  --bio '{"name":"Ada","role":"release manager","description":"Owns the CI/CD pipeline and cuts releases"}' \
+  "Who are you and what do you do?"
+```
+
+```text
+I'm Ada, the release manager. I own the CI/CD pipeline and cut releases.
+```
+
+With base instructions layered before the task instructions:
+
+```bash
+aux4 ai agent ask --config \
+  --baseInstructions base-policy.md \
+  --instructions task.md \
+  "Refactor the build script"
+```
+
+The contents of `base-policy.md` are loaded as the immutable base layer, then `task.md` is layered on top.
 
 With a named model from registry:
 
