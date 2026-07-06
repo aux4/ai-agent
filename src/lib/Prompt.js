@@ -1,9 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { getModel } from "./Models.js";
+import {
+  deserializeMessage,
+  recoverTruncatedImageArgs,
+  simplifyMessagesForHistory,
+  collapseSystemMessages
+} from "./MessageFormat.js";
 import { readFile, asJson } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
@@ -272,77 +277,7 @@ class Prompt {
     const messages = collapseSystemMessages(this.messages, extraSystem);
 
     const promptTemplate = ChatPromptTemplate.fromMessages(
-      messages.map((message, index) => {
-        try {
-          const content = [];
-
-        if (message.content) {
-          content.push({ type: "text", text: message.content });
-        }
-
-        if (message.images) {
-          message.images.forEach(image => {
-            content.push(image);
-          });
-        }
-
-        if (message.role === "system") {
-          return new SystemMessage({ content });
-        } else if (message.role === "assistant_with_tool") {
-          if (message.content && message.content.kwargs) {
-            return new AIMessage({
-              content: message.content.kwargs.content || "",
-              tool_calls: message.content.kwargs.tool_calls || [],
-              additional_kwargs: message.content.kwargs.additional_kwargs || {}
-            });
-          } else {
-            return new AIMessage({ ...message.content });
-          }
-        } else if (message.role === "assistant") {
-          return new AIMessage({ content });
-        } else if (message.role === "tool") {
-          // Handle raw tool message objects (our new format)
-          if (message.tool_call_id && message.name) {
-            return new ToolMessage({
-              content: message.content,
-              tool_call_id: message.tool_call_id,
-              name: message.name
-            });
-          } else if (message.content && message.content.kwargs) {
-            let toolContent = [];
-            if (Array.isArray(message.content.kwargs.content)) {
-              // Process all content types, not just text
-              toolContent = message.content.kwargs.content.map(item => {
-                if (item.type === "text") {
-                  return { type: "text", text: item.text };
-                } else if (item.type === "image_url") {
-                  return { type: "image_url", image_url: item.image_url };
-                }
-                return item;
-              });
-            } else if (typeof message.content.kwargs.content === "string") {
-              toolContent = [{ type: "text", text: message.content.kwargs.content }];
-            }
-
-            return new ToolMessage({
-              content: toolContent.length > 0 ? toolContent : [{ type: "text", text: "Tool response" }],
-              tool_call_id: message.content.kwargs.tool_call_id,
-              name: message.content.kwargs.name
-            });
-          } else {
-            const toolContent = message.content.content || message.content;
-            return new ToolMessage({
-              content: typeof toolContent === "string" ? toolContent : JSON.stringify(toolContent),
-              tool_call_id: message.content.tool_call_id || "unknown",
-              name: message.content.name || "unknown"
-            });
-          }
-        }
-        return new HumanMessage({ content });
-        } catch (error) {
-          throw new Error(`Error processing message at index ${index}: ${error.message}. Message: ${JSON.stringify(message)}`);
-        }
-      })
+      messages.map((message, index) => deserializeMessage(message, index))
     );
 
     let chain = promptTemplate.pipe(this.model);
@@ -374,46 +309,7 @@ class Prompt {
         this.saveHistory();
 
         // Pre-process saveImage tool calls to extract full base64 from previous tool responses
-        for (const toolCall of response.tool_calls) {
-          if (toolCall.args && typeof toolCall.args.content === "string" && toolCall.args.content.includes("...")) {
-            console.error("WARNING: Tool call argument appears to be truncated:", toolCall.name, "content length:", toolCall.args.content.length);
-          }
-
-          if (toolCall.name === "saveImage" && toolCall.args && toolCall.args.content && toolCall.args.content.includes("...")) {
-            for (let i = this.messages.length - 1; i >= 0; i--) {
-              const msg = this.messages[i];
-              if (msg.role === "tool" && msg.content) {
-                let fullBase64 = null;
-                try {
-                  if (typeof msg.content === "string") {
-                    const parsed = JSON.parse(msg.content);
-                    if (parsed.kwargs && parsed.kwargs.content && Array.isArray(parsed.kwargs.content)) {
-                      const imageItem = parsed.kwargs.content.find(item => item.type === "image_url");
-                      if (imageItem && imageItem.image_url && imageItem.image_url.url) {
-                        fullBase64 = imageItem.image_url.url;
-                      }
-                    }
-                  } else if (msg.content.content) {
-                    const parsed = JSON.parse(msg.content.content);
-                    if (parsed.kwargs && parsed.kwargs.content && Array.isArray(parsed.kwargs.content)) {
-                      const imageItem = parsed.kwargs.content.find(item => item.type === "image_url");
-                      if (imageItem && imageItem.image_url && imageItem.image_url.url) {
-                        fullBase64 = imageItem.image_url.url;
-                      }
-                    }
-                  }
-                } catch (e) {
-                  // Not JSON, continue searching
-                }
-                if (fullBase64) {
-                  console.log("Found full base64 image data, replacing truncated content");
-                  toolCall.args.content = fullBase64;
-                  break;
-                }
-              }
-            }
-          }
-        }
+        recoverTruncatedImageArgs(response.tool_calls, this.messages);
 
         // Execute all tool calls in parallel
         const toolNames = response.tool_calls.map(tc => tc.name).join(", ");
@@ -679,24 +575,7 @@ class Prompt {
   saveHistory(sync = false) {
     if (!this.historyFile) return;
     try {
-      const simplifiedMessages = this.messages
-        .filter(message => message.role !== "system" || message.timestamp)
-        .map(message => {
-          if (message.role === "tool") {
-            const entry = {
-              role: "tool",
-              content: message.content,
-              tool_call_id: message.tool_call_id,
-              name: message.name,
-              timestamp: message.timestamp
-            };
-            // Preserve the policy decision recorded on this tool entry (shared
-            // history/trace structure — the `policy` field on tool entries).
-            if (message.policy) entry.policy = message.policy;
-            return entry;
-          }
-          return message;
-        });
+      const simplifiedMessages = simplifyMessagesForHistory(this.messages);
 
       if (simplifiedMessages.length === 0) return;
 
@@ -732,45 +611,10 @@ class Prompt {
   }
 }
 
-// Merge all system-role messages, in order, into one leading system message and
-// keep every non-system message in its original position. `extraSystem` (e.g. the
-// output-schema format instructions) is appended last so it stays part of the
-// single system message rather than being injected mid-conversation. This keeps
-// the assembled sequence valid for providers that only permit a system message as
-// the first passed message (Anthropic, Bedrock/Claude, ...).
-export function collapseSystemMessages(messages, extraSystem = null) {
-  const systemContents = [];
-  const systemImages = [];
-  const rest = [];
-
-  for (const message of messages) {
-    if (message && message.role === "system") {
-      if (typeof message.content === "string" && message.content.trim() !== "") {
-        systemContents.push(message.content);
-      }
-      if (Array.isArray(message.images) && message.images.length > 0) {
-        systemImages.push(...message.images);
-      }
-    } else {
-      rest.push(message);
-    }
-  }
-
-  if (extraSystem && extraSystem.trim() !== "") {
-    systemContents.push(extraSystem);
-  }
-
-  if (systemContents.length === 0 && systemImages.length === 0) {
-    return rest;
-  }
-
-  const systemMessage = { role: "system", content: systemContents.join("\n\n") };
-  if (systemImages.length > 0) {
-    systemMessage.images = systemImages;
-  }
-
-  return [systemMessage, ...rest];
-}
+// `collapseSystemMessages` now lives in MessageFormat.js (importable without Prompt's
+// heavy transitive deps, so it can be unit-tested directly). Re-exported here (from the
+// binding imported at the top) to keep the historical `Prompt.js` import path working.
+export { collapseSystemMessages };
 
 async function replacePromptVariables(text, params = {}) {
   if (!text) return text;
