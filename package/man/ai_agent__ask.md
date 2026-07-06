@@ -17,13 +17,14 @@ Key features:
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Loop budget** — a safety cap on the tool-execution loop: an always-on iteration cap (`--maxIterations`, default 50) plus optional token/time caps (`--budget`). When a limit trips the loop stops cleanly, appends a `[budget-exceeded]` note, persists history, and exits with code 7
+- **History session locking** — when `--history <file>` is used, the run takes a real advisory lock (`<file>.lock`) held for its entire duration, so concurrent runs (a heartbeat firing during a long ask, two parallel agents) can never clobber or drop turns. On contention the default is to fail fast with a clear error and exit code 8; `--waitLock <duration>` opts into poll-waiting. History is written atomically (temp file + rename)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -31,6 +32,8 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --bio            Agent identity as a JSON object with name, role, description — rendered as a `# Agent Identity` system section (default: "")
 --role           Role used in the prompt (default: user)
 --history        History JSON file for multi-turn conversations (default: "")
+--waitLock       How long to wait for a busy history lock before failing, e.g. 30s, 5m (default: "" = fail fast with exit code 8)
+--staleLock      Age since last refresh past which a history lock is considered abandoned and stolen, e.g. 10m, 1h (default: 30m)
 --outputSchema   JSON schema file to constrain structured output (default: schema.json)
 --context        Read additional context from stdin (default: false)
 --image          Image path(s), comma-separated for multiple (default: "")
@@ -70,6 +73,14 @@ Budget config fields:
 - `maxTimeMs` — optional cap on wall-clock time spent in the loop (default: no limit)
 
 When any limit trips, the loop terminates cleanly rather than being abandoned: a final assistant note prefixed with `[budget-exceeded]` is appended (naming the limit and the tools the agent was about to call), the conversation history and accumulated token usage are persisted (when `--history` is set), that note is returned as the answer, and the command exits with code **7** (distinct from a generic failure) so a supervising process can detect the truncation and, for example, resume with a higher budget or escalate to a human.
+
+**History session locking (`--waitLock` / `--staleLock`):** The history file is the agent's session store — the `ask`/`chat` loop rewrites it after every step. When two runs touch the same history at once (a heartbeat firing during a long ask, two parallel agents, a chat session while a cron ask runs), unguarded writes can corrupt or silently drop turns. To prevent that, every run with `--history` acquires a real advisory lock at start: a `<history>.lock` file (recording pid, host, and timestamp) created atomically, held for the whole run, refreshed on every save, and released on all exit paths (normal exit, error, and SIGINT/SIGTERM/SIGHUP).
+
+- **Contention (default: fail fast).** If the history is already locked by a live, non-stale owner, the command prints `Error: history in use by pid <N> ... since <time>` and exits with code **8** — distinct from a generic failure (1) and from the loop-budget code (7) so a supervisor can tell "history in use" apart from a real error. It never silently proceeds.
+- **Waiting (`--waitLock <duration>`).** Opt into poll-waiting for the lock to free. Durations accept `ms`/`s`/`m`/`h` suffixes (e.g. `30s`, `5m`) or a bare number of milliseconds. If the lock does not free within the window, the command still fails with exit code 8.
+- **Stale locks (`--staleLock <duration>`).** A lock whose same-host owner process is gone (dead pid), or that has not been refreshed within the stale threshold (default **30m**), is presumed abandoned and stolen with a `[lock] stealing stale history lock ...` warning — so a crashed run can never wedge a history file forever. Because each save refreshes the lock, the threshold is really a "no progress for this long" cap, not a cap on total run time.
+
+Atomic writes back this up: the history is written to a sibling temp file and renamed into place, so a reader (or a crashing writer) never observes a half-written history. This replaces the previous best-effort size heuristic.
 
 **Agent identity (`--bio`):** Pass a JSON object describing who the agent is. The recognized fields are `name`, `role`, and `description`. When present, they are rendered as a `# Agent Identity` system section (bold `**Name:**` / `**Role:**` / `**Description:**` lines) and injected at the top of the system prompt — above the base instructions and the main instructions — so the agent consistently knows its persona. An empty or omitted `--bio` adds nothing. When stored in a config file under a top-level `bio:` key, aux4 delivers it as JSON automatically.
 
@@ -144,6 +155,22 @@ If the loop hits a limit, the answer is a budget-exceeded note and the command e
 
 ```text
 [budget-exceeded] Loop budget exceeded: maximum tool-loop iterations reached (limit 100). The task was stopped before completion to prevent a runaway tool loop. The agent was about to call: executeAux4.
+```
+
+With a shared history under concurrent access. A second run on a locked history fails fast:
+
+```bash
+aux4 ai agent ask --history session.json "another question"
+```
+
+```text
+Error: history in use by pid 4821 since 2026-07-06T14:03:11.204Z (session.json.lock). Wait with --waitLock <duration> or steal a dead lock by removing the file.
+```
+
+Wait up to 30 seconds for the lock to free instead of failing immediately:
+
+```bash
+aux4 ai agent ask --history session.json --waitLock 30s "another question"
 ```
 
 With an agent identity (`--bio`):

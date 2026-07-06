@@ -7,6 +7,7 @@ import { resolveFromConfig } from "../../lib/ModelResolver.js";
 import { loadSkillsCatalog } from "../../lib/Skills.js";
 import { Policy } from "../../lib/Policy.js";
 import { BUDGET_EXIT_CODE } from "../../lib/LoopBudget.js";
+import { LockError, LOCK_EXIT_CODE, parseDuration } from "../../lib/HistoryLock.js";
 
 export async function askExecutor(params) {
   try {
@@ -49,6 +50,19 @@ export async function askExecutor(params) {
         budgetSpec.maxTimeMs !== undefined && budgetSpec.maxTimeMs !== null
           ? parseInt(budgetSpec.maxTimeMs, 10)
           : null
+    };
+
+    // Session lock config. --waitLock <duration> (empty = fail fast) opts into
+    // poll-waiting for a busy history lock; --staleLock <duration> overrides the
+    // threshold past which an un-refreshed lock is stolen (default 30m). Durations
+    // accept ms/s/m/h suffixes or a bare number of milliseconds.
+    const waitMs = parseDuration(params.waitLock);
+    const staleMs = params.staleLock !== undefined && params.staleLock !== null && `${params.staleLock}` !== ""
+      ? parseDuration(params.staleLock)
+      : undefined;
+    const lock = {
+      waitMs: waitMs !== null ? waitMs : 0,
+      staleMs
     };
 
     const bio = params.bio;
@@ -105,7 +119,7 @@ export async function askExecutor(params) {
       toolsConfig.skills = skills;
     }
 
-    const prompt = new Prompt(model, toolsConfig, { compaction, policy, budget });
+    const prompt = new Prompt(model, toolsConfig, { compaction, policy, budget, lock });
     await prompt.init();
 
     if (bio && typeof bio === "object" && Object.keys(bio).length > 0) {
@@ -159,6 +173,13 @@ export async function askExecutor(params) {
       process.exitCode = BUDGET_EXIT_CODE;
     }
   } catch (error) {
+    // Contention on the history lock is an expected, recoverable condition — not a
+    // crash. Report it cleanly (no stack trace) and exit with the distinct lock code
+    // so a supervisor can tell "history in use" apart from a real failure.
+    if (error instanceof LockError) {
+      console.error(`Error: ${error.message}`);
+      process.exit(LOCK_EXIT_CODE);
+    }
     if (error instanceof PromptError) {
       console.error("Prompt error:", error.message);
     } else {

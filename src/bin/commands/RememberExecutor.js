@@ -3,6 +3,11 @@ import { rememberMessages } from "../../lib/Compaction.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
 import "colors";
 
+// Audit note (HARN-004): remember is READ-ONLY — it reads the history and writes the
+// memory entry to stdout, never back to the history file. Because every writer now
+// uses an atomic temp-file+rename, a read here always observes a complete snapshot,
+// so no exclusive session lock is required.
+
 export async function rememberExecutor(params) {
   const { historyFile } = params;
   const model = params.useModel

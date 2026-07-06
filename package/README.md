@@ -1029,6 +1029,79 @@ history lets the run continue from where it stopped.
 
 ---
 
+## History Session Locking
+
+The history file (`--history <file>`) is the agent's session store: the `ask`/`chat`
+loop rewrites it after every step. When two runs touch the **same** history file at
+once — a heartbeat firing during a long ask, two parallel agents, or a chat session
+while a cron ask runs — unguarded writes can corrupt the file or silently drop turns.
+
+To prevent that, every run with `--history` acquires a real advisory lock at start: a
+`<file>.lock` file (recording the pid, host, and timestamp) created atomically, held
+for the whole run, refreshed on every save, and released on all exit paths (normal
+exit, error, and SIGINT/SIGTERM/SIGHUP). History is also written atomically — to a
+sibling temp file that is renamed into place — so a reader or a crashing writer never
+observes a half-written file. This atomic write replaces the previous best-effort size
+heuristic, which could not actually prevent concurrent clobbering.
+
+### Contention
+
+By default, contention **fails fast** — the run never silently proceeds:
+
+```bash
+aux4 ai agent ask --history session.json "another question"
+```
+
+```text
+Error: history in use by pid 4821 since 2026-07-06T14:03:11.204Z (session.json.lock). Wait with --waitLock <duration> or steal a dead lock by removing the file.
+```
+
+The command exits with code **`8`** — distinct from a generic failure (`1`) and from
+the loop-budget code (`7`) — so a supervisor can tell "history in use" apart from a
+real error.
+
+### Waiting
+
+Use `--waitLock <duration>` to poll-wait for the lock to free instead of failing
+immediately. Durations accept `ms`/`s`/`m`/`h` suffixes or a bare number of
+milliseconds:
+
+```bash
+aux4 ai agent ask --history session.json --waitLock 30s "another question"
+```
+
+If the lock does not free within the window, the command still exits with code `8`.
+
+### Stale locks
+
+A lock whose same-host owner process is gone (dead pid), or that has not been
+refreshed within the stale threshold (default **30m**, override with `--staleLock
+<duration>`), is presumed abandoned and stolen with a warning:
+
+```text
+[lock] stealing stale history lock (pid 4821 since 2026-07-06T13:31:02.900Z) on session.json.lock
+```
+
+Because each save refreshes the lock, the threshold is a "no progress for this long"
+cap, not a cap on total run time — so a crashed run can never wedge a history file
+forever.
+
+The same locking applies to `chat` (each turn is an `ask`) and to `compact` (which
+rewrites the history in place). The read-only `summarize` and `remember` commands do
+not take an exclusive lock: atomic writes mean their reads always see a complete
+snapshot.
+
+Configured via `config.yaml`:
+
+```yaml
+config:
+  agent:
+    waitLock: 30s     # default: "" (fail fast)
+    staleLock: 30m    # default: 30m
+```
+
+---
+
 ## Tools
 
 Overview

@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import { compactMessages } from "../../lib/Compaction.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
+import { HistoryLock, LockError, LOCK_EXIT_CODE, writeFileAtomic, parseDuration } from "../../lib/HistoryLock.js";
 import "colors";
 
 export async function compactExecutor(params) {
@@ -21,6 +22,25 @@ export async function compactExecutor(params) {
     process.exit(1);
   }
 
+  // Compaction rewrites the history file in place, so it takes the same session lock
+  // an ask does — otherwise a compact could clobber a running ask (or vice versa).
+  // --waitLock opts into poll-waiting; otherwise fail fast with the lock exit code.
+  const waitMs = parseDuration(params.waitLock);
+  const staleMs = params.staleLock !== undefined && params.staleLock !== null && `${params.staleLock}` !== ""
+    ? parseDuration(params.staleLock)
+    : undefined;
+  const lock = new HistoryLock(historyFile, { waitMs: waitMs !== null ? waitMs : 0, staleMs });
+
+  try {
+    await lock.acquire();
+  } catch (error) {
+    if (error instanceof LockError) {
+      console.error(`Error: ${error.message}`.red);
+      process.exit(LOCK_EXIT_CODE);
+    }
+    throw error;
+  }
+
   try {
     const historyContent = readFileSync(historyFile, "utf8");
     const messages = JSON.parse(historyContent);
@@ -36,7 +56,7 @@ export async function compactExecutor(params) {
     const compacted = await compactMessages(messages, model, { keepLastMessages });
 
     const compactedCount = compacted.length;
-    writeFileSync(historyFile, JSON.stringify(compacted));
+    writeFileAtomic(historyFile, JSON.stringify(compacted));
 
     console.error(`Compacted: ${originalCount} → ${compactedCount} messages`);
 
@@ -53,5 +73,7 @@ export async function compactExecutor(params) {
       console.error(`Error compacting history: ${error.message}`.red);
     }
     process.exit(1);
+  } finally {
+    lock.release();
   }
 }

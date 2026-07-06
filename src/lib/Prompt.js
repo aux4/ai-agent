@@ -14,6 +14,7 @@ import { shouldCompact, compactMessages } from "./Compaction.js";
 import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
 import { LoopBudget } from "./LoopBudget.js";
+import { HistoryLock, writeFileAtomic } from "./HistoryLock.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -37,6 +38,11 @@ class Prompt {
     // optionally). Always present so the loop can never run uncapped.
     this.budget = new LoopBudget(options.budget || {});
     this.budgetExceeded = null;
+    // Session lock config for the history file. { waitMs, staleMs, enabled }.
+    // Acquired lazily in history() once a history file is known; held for the whole
+    // run so concurrent asks/compaction on the same file can never clobber it.
+    this.lockConfig = options.lock || null;
+    this.historyLock = null;
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
@@ -123,6 +129,10 @@ class Prompt {
     if (!file || file === "") return;
 
     this.historyFile = file;
+    // Acquire the session lock BEFORE reading the file so the whole load+run is
+    // guarded. On contention this throws a LockError (fail fast) unless --waitLock
+    // opted into poll-waiting; the executor turns that into the lock exit code.
+    await this.acquireHistoryLock();
     const historyData = (await readFile(file).then(asJson())) || [];
     if (Array.isArray(historyData)) {
       this.messages = this.messages.concat(historyData);
@@ -139,6 +149,27 @@ class Prompt {
         };
       }
     }
+  }
+
+  // Acquire the per-history session lock. Idempotent: a run holds a single lock for
+  // its whole lifetime. Set lockConfig.enabled = false to opt out entirely.
+  async acquireHistoryLock() {
+    if (!this.historyFile || this.historyLock) return;
+    const cfg = this.lockConfig || {};
+    if (cfg.enabled === false) return;
+    const lock = new HistoryLock(this.historyFile, {
+      waitMs: cfg.waitMs,
+      staleMs: cfg.staleMs
+    });
+    await lock.acquire();
+    this.historyLock = lock;
+  }
+
+  // Release the session lock if held. Idempotent; safe from finally/close paths.
+  releaseHistoryLock() {
+    if (!this.historyLock) return;
+    this.historyLock.release();
+    this.historyLock = null;
   }
 
   setOutputSchema(schema) {
@@ -675,25 +706,25 @@ class Prompt {
       });
       if (data.length < 3) return;
 
-      // Skip writing if file on disk is larger (avoids clobbering from a
-      // concurrent process). Allow writes when compacted, when the file is
-      // small (seed-only), or when the difference is modest (format change).
-      if (!this.compacted) {
-        try {
-          const existing = fs.statSync(this.historyFile);
-          if (existing.size > data.length * 1.5 && existing.size > 1024) return;
-        } catch {}
-      }
-
-      // Always write synchronously to prevent 0-byte files from async
-      // truncation when the process exits before the write completes.
-      fs.writeFileSync(this.historyFile, data);
+      // The old size heuristic ("skip write if the on-disk file is >1.5x larger")
+      // was a best-effort guard against a concurrent process clobbering the file.
+      // The session lock (acquired in history(), held for the whole run) now makes
+      // that guard redundant — no other run can be writing this file — so it is
+      // removed. Writes go through writeFileAtomic (temp file + rename) so a reader
+      // or a crashing writer never observes a half-written history, and each save
+      // refreshes the lock so a long, actively-working run is never mistaken for a
+      // stale one.
+      writeFileAtomic(this.historyFile, data);
+      if (this.historyLock) this.historyLock.touch();
     } catch (error) {
       console.error("Error writing history file:", error.message);
     }
   }
 
   async close() {
+    // Release the session lock first so it is freed on every close path, even if
+    // there is no MCP client to tear down.
+    this.releaseHistoryLock();
     if (!this.mcpClient) return;
 
     await this.mcpClient.close();
