@@ -4,6 +4,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { setTimeout as setTimer } from "node:timers";
 import { spawnSync } from "node:child_process";
+import { tokenizeCommand, expandTildeToken } from "./CommandParser.js";
 
 // Escalations live in a per-user directory so a separate `resolve` invocation
 // (possibly an automated approver agent) can answer a parked run.
@@ -49,22 +50,49 @@ function buildVars(ctx) {
 }
 
 // Replace ${var} occurrences in a command string with the injected values.
+// Pure string utility, kept for callers that need a rendered display string.
+// NOTE: this is NOT how the escalate command is executed — execution goes
+// through buildEscalationArgv so injected values never reach a shell. See below.
 export function injectVars(command, ctx) {
   const vars = buildVars(ctx);
   return command.replace(/\$\{(\w+)\}/g, (m, name) => (name in vars ? vars[name] : m));
 }
 
-// Fire the escalate command (any aux4 command). Returns { ok, output }.
+// Build the argv for `aux4 <escalate command>` with the context values injected,
+// WITHOUT going through a shell. The configured command TEMPLATE is tokenized
+// first (POSIX quoting/word-splitting only, no substitution), then ${var}
+// placeholders are substituted INTO each argv token. Because substitution
+// happens AFTER tokenization, an injected value that contains spaces, quotes,
+// newlines, backticks, $(), ;, && or | lands as a single literal argv element
+// and is never word-split, re-quoted, or shell-interpreted. This is the same
+// argv/no-shell treatment CommandParser gives executeAux4 (AGC-016). Tilde
+// expansion applies only to unquoted TEMPLATE tokens, never to injected values.
+// Throws on malformed quoting in the template.
+export function buildEscalationArgv(command, ctx) {
+  const vars = buildVars(ctx);
+  const substitute = value => value.replace(/\$\{(\w+)\}/g, (m, name) => (name in vars ? vars[name] : m));
+  const tokens = tokenizeCommand(command);
+  return ["aux4", ...tokens.map(token => substitute(expandTildeToken(token)))];
+}
+
+// Fire the escalate command (any aux4 command) directly, with no shell.
+// Returns { ok, output }.
 function fireCommand(command, ctx) {
-  const rendered = injectVars(command, ctx);
+  let argv;
   try {
-    const result = spawnSync("aux4", ["sh", "-c", rendered], { encoding: "utf-8", timeout: 30000 });
-    if (result.status !== 0) {
-      // Fall back to running through a shell directly if `aux4 sh` is unavailable.
-      const direct = spawnSync("sh", ["-c", `aux4 ${rendered}`], { encoding: "utf-8", timeout: 30000 });
-      return { ok: direct.status === 0, output: (direct.stdout || "") + (direct.stderr || "") };
+    argv = buildEscalationArgv(command, ctx);
+  } catch (e) {
+    // Malformed quoting in the configured template: report, never execute.
+    return { ok: false, output: `escalate command parse error: ${e.message}` };
+  }
+  try {
+    const result = spawnSync(argv[0], argv.slice(1), { encoding: "utf-8", timeout: 30000 });
+    if (result.error) {
+      // e.g. the `aux4` binary is not on PATH (ENOENT). Report explicitly —
+      // there is deliberately no `sh -c` fallback.
+      return { ok: false, output: `escalate command could not run: ${result.error.message}` };
     }
-    return { ok: true, output: (result.stdout || "") + (result.stderr || "") };
+    return { ok: result.status === 0, output: (result.stdout || "") + (result.stderr || "") };
   } catch (e) {
     return { ok: false, output: e.message };
   }
@@ -155,4 +183,4 @@ function sleep(ms) {
   return new Promise(resolve => setTimer(resolve, ms));
 }
 
-export default { runEscalation, resolveEscalation, injectVars, newEscalationId, escalationsDir };
+export default { runEscalation, resolveEscalation, injectVars, buildEscalationArgv, newEscalationId, escalationsDir };
