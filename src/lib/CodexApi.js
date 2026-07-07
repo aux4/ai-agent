@@ -107,7 +107,38 @@ export class CodexApi {
     const usage = this.extractTokenUsage(response);
     const functionCalls = (response.output || []).filter(item => item.type === "function_call");
 
+    // Feed this request's tokens toward the loop budget (if one is enforced).
+    if (options.budget) {
+      options.budget.addConsumed((usage.input || 0) + (usage.output || 0));
+    }
+
     if (functionCalls.length > 0) {
+      // Enforce the loop budget before running this round of tools. When a limit is
+      // reached, stop cleanly: return a budget-exceeded marker answer instead of
+      // pushing the assistant_with_tool message and recursing. No dangling tool
+      // calls are appended to `messages`.
+      if (options.budget) {
+        const budgetReason = options.budget.recordIteration();
+        if (budgetReason) {
+          const pendingTools = functionCalls.map(fc => fc.name).join(", ");
+          const note = options.budget.terminationNote(budgetReason, {
+            pendingTools,
+            partial: response.output_text || ""
+          });
+          return {
+            answer: note,
+            usage,
+            budgetExceeded: {
+              reason: budgetReason,
+              pendingTools,
+              iterations: options.budget.iterations,
+              tokens: options.budget.consumed,
+              elapsedMs: options.budget.elapsed()
+            }
+          };
+        }
+      }
+
       const parseArgs = (args) => {
         if (!args || args === "") return {};
         try { return JSON.parse(args); } catch { return {}; }

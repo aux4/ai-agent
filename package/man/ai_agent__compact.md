@@ -10,10 +10,12 @@ The compaction process:
 
 The summary preserves key facts, decisions, tool results, and user preferences from the older messages.
 
+Because compaction rewrites the history file in place, it takes the same per-history session lock an `ask` does. If the history is currently locked by a running ask (or another compaction), compact fails fast with exit code 8 — unless `--waitLock <duration>` is set, in which case it poll-waits. The rewrite is atomic (temp file + rename). See the ask man page for the full locking semantics.
+
 #### Usage
 
 ```bash
-aux4 ai agent compact [<historyFile>] [--model <json>] [--keepLastMessages <n>] [--models <json>] [--useModel <name>]
+aux4 ai agent compact [<historyFile>] [--model <json>] [--keepLastMessages <n>] [--models <json>] [--useModel <name>] [--waitLock <duration>] [--staleLock <duration>]
 ```
 
 historyFile         Path to the history JSON file (default: history.json)
@@ -21,6 +23,8 @@ historyFile         Path to the history JSON file (default: history.json)
 --keepLastMessages  Number of recent messages to keep verbatim (default: 6)
 --models            Models registry as JSON (default: {})
 --useModel          Named model from registry to use (default: "")
+--waitLock          How long to wait for a busy history lock before failing, e.g. 30s, 5m (default: "" = fail fast with exit code 8)
+--staleLock         Age since last refresh past which a history lock is considered abandoned and stolen, e.g. 10m, 1h (default: 30m)
 
 #### Example
 

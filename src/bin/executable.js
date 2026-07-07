@@ -99,6 +99,10 @@ function parsePolicyArg(value) {
         policy: parsePolicyArg(args[20]),
         runId: args[21] || "",
         costs: JSON.parse(args[22] || "{}"),
+        maxIterations: args[23] || "",
+        budget: JSON.parse(args[24] || "{}"),
+        waitLock: args[25] || "",
+        staleLock: args[26] || "",
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {
@@ -138,7 +142,9 @@ function parsePolicyArg(value) {
         model: JSON.parse(args[2] || "{}"),
         keepLastMessages: parseInt(args[3] || "6"),
         models: JSON.parse(args[4] || "{}"),
-        useModel: args[5] || ""
+        useModel: args[5] || "",
+        waitLock: args[6] || "",
+        staleLock: args[7] || ""
       });
     } else if (command === "models") {
       await modelsExecutor({

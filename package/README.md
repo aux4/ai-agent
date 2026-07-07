@@ -61,6 +61,8 @@ Key variables (from the package help):
 - policy (default: "") — optional guardrail policy as an inline object with `budget`/`allow`/`deny`/`escalate`, delivered as JSON (see [Policy Guardrails](#policy-guardrails)).
 - runId (default: "") — optional run identifier injected into escalation commands as `${runId}`; auto-generated when empty.
 - costs (default: "{}") — optional cost rates as JSON (`costIn`, `costOut`, `costCache` per 1M tokens) used for the policy `usd` budget.
+- maxIterations (default: "50") — hard cap on the number of tool-loop iterations before the loop is stopped (see [Loop Budget](#loop-budget)).
+- budget (default: "{}") — optional loop budget as JSON (`maxIterations`, `maxTokens`, `maxTimeMs`); overrides `--maxIterations` and adds optional token/time caps (see [Loop Budget](#loop-budget)).
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
@@ -116,6 +118,8 @@ Key variables:
 - autoCompact (default: "false") — enable auto-compaction of conversation history (see [Conversation Compaction](#conversation-compaction)).
 - compaction (default: "{}") — compaction configuration as JSON (see [Conversation Compaction](#conversation-compaction)).
 - permissions (default: "{}") — permissions configuration as JSON with allow, ask, deny arrays (see [Permissions](#permissions)).
+- maxIterations (default: "50") — hard cap on tool-loop iterations per turn (see [Loop Budget](#loop-budget)).
+- budget (default: "{}") — optional loop budget as JSON (`maxIterations`, `maxTokens`, `maxTimeMs`); see [Loop Budget](#loop-budget).
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
@@ -958,6 +962,142 @@ aux4 ai agent policy check "db delete users" --tool executeAux4 \
 
 ```json
 {"tool":"executeAux4","action":"db delete users","decision":"deny","reason":"policy denies executeAux4 \"db delete users\"","trigger":"denied_action","runId":"run_lq3k8z_a1b2c3"}
+```
+
+---
+
+## Loop Budget
+
+The agent runs a tool-execution loop: it invokes the model, runs any tools the model
+requests, feeds the results back, and repeats until the model stops asking for tools.
+A misbehaving model can keep requesting tools forever, burning tokens and time. The
+**loop budget** caps that loop. It applies to every ask (and every chat turn) and to
+every execute path (the standard LangChain path and the Codex path).
+
+Three limits are available:
+
+- **maxIterations** — hard cap on the number of tool-execution rounds. Always on;
+  defaults to `50`. This is the primary safety valve for autonomous agents.
+- **maxTokens** — optional cap on the total tokens consumed during the ask.
+- **maxTimeMs** — optional cap on the wall-clock time spent in the loop.
+
+Set the iteration cap with the simple `--maxIterations` flag, or supply a `--budget`
+JSON object (a config key) to set any combination of the three. Values in the `budget`
+object take precedence over the `--maxIterations` flag.
+
+```bash
+# Simple iteration cap
+aux4 ai agent ask --config --maxIterations 25 --question "research this topic"
+
+# Full budget: cap iterations, tokens, and wall-clock time
+aux4 ai agent ask --config \
+  --budget '{"maxIterations":100,"maxTokens":200000,"maxTimeMs":600000}' \
+  --question "research this topic"
+```
+
+Configured via `config.yaml`:
+
+```yaml
+config:
+  agent:
+    budget:
+      maxIterations: 100    # default: 50
+      maxTokens: 200000     # default: no limit
+      maxTimeMs: 600000     # default: no limit (ms)
+```
+
+### Clean termination
+
+When a limit trips, the loop is **not** abandoned mid-conversation. Instead:
+
+1. A final assistant-visible note is appended to the conversation, prefixed with the
+   marker `[budget-exceeded]`, describing which limit was hit and which tools the
+   agent was about to call.
+2. The conversation history and accumulated token usage are persisted (when
+   `--history` is set).
+3. That note is returned as the answer.
+4. The `ask` command exits with code **`7`** (distinct from a generic failure) so a
+   supervising process can detect the truncation.
+
+```text
+[budget-exceeded] Loop budget exceeded: maximum tool-loop iterations reached (limit 50). The task was stopped before completion to prevent a runaway tool loop. The agent was about to call: executeAux4.
+```
+
+A supervisor can react to exit code `7` — for example by resuming with a higher
+budget, escalating to a human, or recording the truncation — and the persisted
+history lets the run continue from where it stopped.
+
+---
+
+## History Session Locking
+
+The history file (`--history <file>`) is the agent's session store: the `ask`/`chat`
+loop rewrites it after every step. When two runs touch the **same** history file at
+once — a heartbeat firing during a long ask, two parallel agents, or a chat session
+while a cron ask runs — unguarded writes can corrupt the file or silently drop turns.
+
+To prevent that, every run with `--history` acquires a real advisory lock at start: a
+`<file>.lock` file (recording the pid, host, and timestamp) created atomically, held
+for the whole run, refreshed on every save, and released on all exit paths (normal
+exit, error, and SIGINT/SIGTERM/SIGHUP). History is also written atomically — to a
+sibling temp file that is renamed into place — so a reader or a crashing writer never
+observes a half-written file. This atomic write replaces the previous best-effort size
+heuristic, which could not actually prevent concurrent clobbering.
+
+### Contention
+
+By default, contention **fails fast** — the run never silently proceeds:
+
+```bash
+aux4 ai agent ask --history session.json "another question"
+```
+
+```text
+Error: history in use by pid 4821 since 2026-07-06T14:03:11.204Z (session.json.lock). Wait with --waitLock <duration> or steal a dead lock by removing the file.
+```
+
+The command exits with code **`8`** — distinct from a generic failure (`1`) and from
+the loop-budget code (`7`) — so a supervisor can tell "history in use" apart from a
+real error.
+
+### Waiting
+
+Use `--waitLock <duration>` to poll-wait for the lock to free instead of failing
+immediately. Durations accept `ms`/`s`/`m`/`h` suffixes or a bare number of
+milliseconds:
+
+```bash
+aux4 ai agent ask --history session.json --waitLock 30s "another question"
+```
+
+If the lock does not free within the window, the command still exits with code `8`.
+
+### Stale locks
+
+A lock whose same-host owner process is gone (dead pid), or that has not been
+refreshed within the stale threshold (default **30m**, override with `--staleLock
+<duration>`), is presumed abandoned and stolen with a warning:
+
+```text
+[lock] stealing stale history lock (pid 4821 since 2026-07-06T13:31:02.900Z) on session.json.lock
+```
+
+Because each save refreshes the lock, the threshold is a "no progress for this long"
+cap, not a cap on total run time — so a crashed run can never wedge a history file
+forever.
+
+The same locking applies to `chat` (each turn is an `ask`) and to `compact` (which
+rewrites the history in place). The read-only `summarize` and `remember` commands do
+not take an exclusive lock: atomic writes mean their reads always see a complete
+snapshot.
+
+Configured via `config.yaml`:
+
+```yaml
+config:
+  agent:
+    waitLock: 30s     # default: "" (fail fast)
+    staleLock: 30m    # default: 30m
 ```
 
 ---

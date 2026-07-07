@@ -6,6 +6,8 @@ import { readStdIn } from "../../lib/util/Input.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
 import { loadSkillsCatalog } from "../../lib/Skills.js";
 import { Policy } from "../../lib/Policy.js";
+import { BUDGET_EXIT_CODE } from "../../lib/LoopBudget.js";
+import { LockError, LOCK_EXIT_CODE, parseDuration } from "../../lib/HistoryLock.js";
 
 export async function askExecutor(params) {
   try {
@@ -25,6 +27,44 @@ export async function askExecutor(params) {
     const stream = params.stream;
     const autoCompact = params.autoCompact === true || params.autoCompact === "true";
     const compaction = autoCompact ? params.compaction : null;
+
+    // Loop budget: an always-on iteration cap plus optional token/time caps. The
+    // simple --maxIterations flag sets the iteration cap; the --budget object
+    // (config key) can override it and add maxTokens/maxTimeMs. Values from the
+    // budget object take precedence over the flag.
+    const budgetSpec = (params.budget && typeof params.budget === "object") ? params.budget : {};
+    const maxIterationsFlag =
+      params.maxIterations !== undefined && params.maxIterations !== null && `${params.maxIterations}` !== ""
+        ? parseInt(params.maxIterations, 10)
+        : null;
+    const budget = {
+      maxIterations:
+        budgetSpec.maxIterations !== undefined && budgetSpec.maxIterations !== null
+          ? parseInt(budgetSpec.maxIterations, 10)
+          : (maxIterationsFlag !== null ? maxIterationsFlag : 50),
+      maxTokens:
+        budgetSpec.maxTokens !== undefined && budgetSpec.maxTokens !== null
+          ? parseInt(budgetSpec.maxTokens, 10)
+          : null,
+      maxTimeMs:
+        budgetSpec.maxTimeMs !== undefined && budgetSpec.maxTimeMs !== null
+          ? parseInt(budgetSpec.maxTimeMs, 10)
+          : null
+    };
+
+    // Session lock config. --waitLock <duration> (empty = fail fast) opts into
+    // poll-waiting for a busy history lock; --staleLock <duration> overrides the
+    // threshold past which an un-refreshed lock is stolen (default 30m). Durations
+    // accept ms/s/m/h suffixes or a bare number of milliseconds.
+    const waitMs = parseDuration(params.waitLock);
+    const staleMs = params.staleLock !== undefined && params.staleLock !== null && `${params.staleLock}` !== ""
+      ? parseDuration(params.staleLock)
+      : undefined;
+    const lock = {
+      waitMs: waitMs !== null ? waitMs : 0,
+      staleMs
+    };
+
     const bio = params.bio;
     const permissions = params.permissions;
     const references = params.references || (params.packageDir ? path.join(params.packageDir, "references") : "");
@@ -79,7 +119,7 @@ export async function askExecutor(params) {
       toolsConfig.skills = skills;
     }
 
-    const prompt = new Prompt(model, toolsConfig, { compaction, policy });
+    const prompt = new Prompt(model, toolsConfig, { compaction, policy, budget, lock });
     await prompt.init();
 
     if (bio && typeof bio === "object" && Object.keys(bio).length > 0) {
@@ -125,7 +165,21 @@ export async function askExecutor(params) {
     await prompt.message(message, params, role);
 
     prompt.close();
+
+    // A tripped loop budget is not a crash: the answer (budget-exceeded note) has
+    // already been emitted and the history persisted. Surface a distinguishable
+    // non-zero exit so a supervisor can detect the truncation.
+    if (prompt.budgetExceeded) {
+      process.exitCode = BUDGET_EXIT_CODE;
+    }
   } catch (error) {
+    // Contention on the history lock is an expected, recoverable condition — not a
+    // crash. Report it cleanly (no stack trace) and exit with the distinct lock code
+    // so a supervisor can tell "history in use" apart from a real failure.
+    if (error instanceof LockError) {
+      console.error(`Error: ${error.message}`);
+      process.exit(LOCK_EXIT_CODE);
+    }
     if (error instanceof PromptError) {
       console.error("Prompt error:", error.message);
     } else {
