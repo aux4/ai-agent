@@ -71,246 +71,6 @@ const BINARY_TOOL_HINTS = {
   ".jpeg": "Use the image parameter on the ask command to pass images to the model."
 };
 
-export const readLocalFileTool = tool(
-  async ({ file, offset, limit }) => {
-    try {
-      const expandedPath = expandTildePath(file);
-      const filePath = path.resolve(expandedPath);
-      const currentDirectory = process.cwd();
-      if (!isReadOnlyPathAllowed(filePath, currentDirectory)) throw new Error("Access denied");
-      if (!fs.existsSync(filePath)) throw new Error("File not found");
-
-      const ext = path.extname(filePath).toLowerCase();
-      if (BINARY_EXTENSIONS.has(ext)) {
-        const hint = BINARY_TOOL_HINTS[ext] || "";
-        return `Cannot read binary file (${ext}). ${hint}`.trim();
-      }
-
-      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
-
-      if (offset !== undefined || limit !== undefined) {
-        const lines = content.split("\n");
-        const start = offset || 0;
-        const end = limit !== undefined ? start + limit : lines.length;
-        const sliced = lines.slice(start, end);
-        const totalLines = lines.length;
-        let result = sliced.join("\n");
-        if (end < totalLines) {
-          result += `\n\n[Showing lines ${start + 1}-${end} of ${totalLines}. Use offset=${end} to read more.]`;
-        }
-        return result;
-      }
-
-      return content;
-    } catch (e) {
-      if (e.code === "ENOENT") {
-        return "File not found";
-      } else if (e.code === "EACCES") {
-        return "Access denied";
-      }
-      return e.message;
-    }
-  },
-  {
-    name: "readFile",
-    description: readFileDesc,
-    schema: z.object({
-      file: z.string(),
-      offset: z.number().optional().describe("Line number to start reading from (0-based). Use with limit to paginate large files."),
-      limit: z.number().optional().describe("Maximum number of lines to read. Use with offset to paginate large files.")
-    })
-  }
-);
-
-export const writeLocalFileTool = tool(
-  async ({ file, content }) => {
-    try {
-      const filePath = path.resolve(file);
-      const currentDirectory = process.cwd();
-      if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
-
-      // Check if file already exists
-      const fileExists = fs.existsSync(filePath);
-
-      fs.writeFileSync(filePath, content, { encoding: "utf-8" });
-
-      // Track the created file only if it's new
-      if (!fileExists) {
-        createdPaths.push(filePath);
-      }
-
-      return "file created";
-    } catch (e) {
-      if (e.code === "ENOENT") {
-        return "File not found";
-      } else if (e.code === "EACCES") {
-        return "Access denied";
-      }
-      return e.message;
-    }
-  },
-  {
-    name: "writeFile",
-    description: writeFileDesc,
-    schema: z.object({
-      file: z.string(),
-      content: z.string()
-    })
-  }
-);
-
-export const editLocalFileTool = tool(
-  async ({ file, old_string, new_string, replace_all = false }) => {
-    try {
-      const filePath = path.resolve(file);
-      const currentDirectory = process.cwd();
-      if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
-
-      // File must exist for editing
-      if (!fs.existsSync(filePath)) {
-        return "File not found";
-      }
-
-      // Read current content
-      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
-
-      // Check if old_string exists in the file
-      if (!content.includes(old_string)) {
-        return "old_string not found in file";
-      }
-
-      // Perform replacement
-      let newContent;
-      let replacementCount = 0;
-
-      if (replace_all) {
-        // Count occurrences before replacing
-        const regex = new RegExp(old_string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
-        replacementCount = (content.match(regex) || []).length;
-        newContent = content.split(old_string).join(new_string);
-      } else {
-        replacementCount = 1;
-        newContent = content.replace(old_string, new_string);
-      }
-
-      // Write the modified content
-      fs.writeFileSync(filePath, newContent, { encoding: "utf-8" });
-
-      if (replacementCount > 1) {
-        return `file edited (${replacementCount} replacements)`;
-      }
-      return "file edited";
-    } catch (e) {
-      if (e.code === "ENOENT") {
-        return "File not found";
-      } else if (e.code === "EACCES") {
-        return "Access denied";
-      }
-      return e.message;
-    }
-  },
-  {
-    name: "editFile",
-    description: editFileDesc,
-    schema: z.object({
-      file: z.string(),
-      old_string: z.string(),
-      new_string: z.string(),
-      replace_all: z.boolean().optional()
-    })
-  }
-);
-
-export const listFilesTool = tool(
-  async ({ path: targetPath, recursive = true, exclude = "" }) => {
-    try {
-      const currentDirectory = process.cwd();
-
-      const expandedPath = expandTildePath(targetPath || currentDirectory);
-      const directory = path.resolve(expandedPath);
-      const recurse = recursive !== false && recursive !== "false";
-      const excludePrefixes = (exclude && exclude.split(",")) || [];
-      if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
-
-      const entries = fs.readdirSync(directory, { withFileTypes: true });
-      const result = [];
-
-      for (const entry of entries) {
-        const fullPath = path.join(directory, entry.name);
-        const relPath = path.relative(currentDirectory, fullPath);
-        if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
-
-        let isFile = entry.isFile();
-        let isDir = entry.isDirectory();
-        if (entry.isSymbolicLink()) {
-          try {
-            const stat = fs.statSync(fullPath);
-            isFile = stat.isFile();
-            isDir = stat.isDirectory();
-          } catch { continue; }
-        }
-
-        if (isFile) {
-          result.push(relPath);
-        } else if (isDir && recurse) {
-          const subFiles = fs
-            .readdirSync(fullPath, { withFileTypes: true })
-            .filter(e => {
-              if (e.isFile()) return true;
-              if (e.isSymbolicLink()) {
-                try { return fs.statSync(path.join(fullPath, e.name)).isFile(); } catch { return false; }
-              }
-              return false;
-            })
-            .map(e => path.join(relPath, e.name))
-            .filter(p => !excludePrefixes.some(prefix => p.startsWith(prefix)));
-          result.push(...subFiles);
-        }
-      }
-
-      return result.join("\n");
-    } catch (e) {
-      if (e.code === "ENOENT") {
-        return "Directory not found";
-      } else if (e.code === "EACCES") {
-        return "Access denied";
-      }
-      return e.message;
-    }
-  },
-  {
-    name: "listFiles",
-    description: listFilesDesc,
-    schema: z.object({
-      path: z.string().optional(),
-      recursive: z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional(),
-      exclude: z.string().optional()
-    })
-  }
-);
-
-export const createDirectoryTool = tool(
-  async ({ path: dirPath }) => {
-    const directory = path.resolve(dirPath);
-    const currentDirectory = process.cwd();
-    if (!directory.startsWith(currentDirectory)) throw new Error("Access denied");
-    if (fs.existsSync(directory)) return "directory already exists";
-    fs.mkdirSync(directory, { recursive: true });
-
-    // Track the created directory
-    createdPaths.push(directory);
-
-    return "directory created";
-  },
-  {
-    name: "createDirectory",
-    description: createDirectoryDesc,
-    schema: z.object({
-      path: z.string()
-    })
-  }
-);
-
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
 
@@ -500,47 +260,28 @@ function formatTimeoutMessage(command, timeout, error) {
   return lines.join("\n");
 }
 
-export const executeAux4CliTool = tool(
-  async ({ command, stdin, timeout, cwd }) => {
-    // Check system-level deny first (cannot be overridden)
-    for (const pattern of SYSTEM_DENY) {
-      if (matchesPattern(command, pattern)) {
-        return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
-      }
-    }
-
-    let argv;
-    try {
-      argv = buildAux4Argv(command);
-    } catch (error) {
-      return `Error parsing command "${command}": ${error.message}. Check that quotes are balanced.`;
-    }
-
-    try {
-      const result = await executeWithTimeout(argv, { stdin, timeout, cwd, displayCmd: `aux4 ${command}` });
-      return result;
-    } catch (error) {
-      if (error.timedOut) {
-        return formatTimeoutMessage(command, timeout, error);
-      }
-      return `Error executing command: ${error.message}`;
-    }
-  },
-  {
-    name: "executeAux4",
-    description: executeAux4Desc,
-    schema: z.object({
-      command: z.string(),
-      stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
-      cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
-    })
-  }
-);
+// ---------------------------------------------------------------------------
+// Permission primitives
+// ---------------------------------------------------------------------------
 
 // Re-exported from PatternUtils so existing importers keep working.
 export const matchesPattern = matchesPatternUtil;
 export const parsePattern = parsePatternUtil;
+
+// System-level deny list — always blocked, cannot be overridden by config.
+const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
+
+// The message returned when a command is blocked by the SYSTEM_DENY list.
+const SYSTEM_DENY_MESSAGE = (command) =>
+  `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
+
+// Returns the SYSTEM_DENY message if the command is system-blocked, otherwise null.
+function checkSystemDeny(command) {
+  for (const pattern of SYSTEM_DENY) {
+    if (matchesPattern(command, pattern)) return SYSTEM_DENY_MESSAGE(command);
+  }
+  return null;
+}
 
 // Parse a subject string into its type and value
 // Returns { type: "command"|"file", scope?: string, value: string }
@@ -586,104 +327,6 @@ export function checkPermission(subject, permissions = {}) {
   return "deny";
 }
 
-// System-level deny list — always blocked, cannot be overridden by config
-const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
-
-// Factory that wraps executeAux4 with permission checking
-export const createExecuteAux4Tool = (permissions, hil = {}) => tool(
-  async ({ command, stdin, timeout, cwd }) => {
-    // Check system-level deny first (cannot be overridden)
-    for (const pattern of SYSTEM_DENY) {
-      if (matchesPattern(command, pattern)) {
-        return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
-      }
-    }
-
-    const decision = checkPermission(command, permissions);
-
-    if (decision === "deny") {
-      return `Permission denied: command "${command}" is not allowed by the permissions configuration.`;
-    }
-
-    if (decision === "ask") {
-      const key = commandKey(command);
-      const resolved = hil.resolutions && hil.resolutions[key];
-      const gate = resolveHumanGate({ resolution: resolved, hasTTY: process.stdin.isTTY, mode: hil.humanInLoop });
-
-      if (gate.action === "resolved") {
-        // Resume path: the parked permission was answered. Affirmative → run; else deny.
-        if (!isAffirmative(resolved.answer)) {
-          return `Command "${command}" was denied by the user.`;
-        }
-      } else if (gate.action === "prompt") {
-        const confirmed = await new Promise((resolve) => {
-          askUserQueue = askUserQueue.then(async () => {
-            const rl = readline.createInterface({
-              input: process.stdin,
-              output: process.stderr
-            });
-            process.stderr.write(`\n🔒 The agent wants to execute: aux4 ${command}\nAllow? (Y/n) > `);
-            const answer = await new Promise((res) => {
-              rl.on("line", (line) => {
-                rl.close();
-                res(line);
-              });
-              rl.on("close", () => res(""));
-            });
-            const accepted = answer.trim() === "" || answer.trim().toLowerCase() === "y";
-            resolve(accepted);
-          });
-        });
-
-        if (!confirmed) {
-          return `Command "${command}" was denied by the user.`;
-        }
-      } else if (gate.action === "auto") {
-        // auto mode (no TTY): preserve legacy behavior — deny.
-        return `Permission denied: command "${command}" requires user confirmation but session is non-interactive.`;
-      } else {
-        // park mode (no TTY): suspend and wait for a human answer.
-        return makeParkSignal({
-          kind: "permission",
-          tool: "executeAux4",
-          key,
-          question: `The agent wants to run: aux4 ${command}\nAllow?`,
-          command,
-          args: { command, stdin, timeout, cwd },
-          timestamp: Date.now()
-        });
-      }
-    }
-
-    let argv;
-    try {
-      argv = buildAux4Argv(command);
-    } catch (error) {
-      return `Error parsing command "${command}": ${error.message}. Check that quotes are balanced.`;
-    }
-
-    try {
-      const result = await executeWithTimeout(argv, { stdin, timeout, cwd, displayCmd: `aux4 ${command}` });
-      return result;
-    } catch (error) {
-      if (error.timedOut) {
-        return formatTimeoutMessage(command, timeout, error);
-      }
-      return `Error executing command: ${error.message}`;
-    }
-  },
-  {
-    name: "executeAux4",
-    description: executeAux4Desc,
-    schema: z.object({
-      command: z.string(),
-      stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
-      cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
-    })
-  }
-);
-
 // Helper to prompt user for file permission (reuses askUserQueue serialization)
 async function askFilePermission(scope, filePath) {
   if (!process.stdin.isTTY) {
@@ -708,11 +351,15 @@ async function askFilePermission(scope, filePath) {
   });
 }
 
-// Helper to check file permission. Returns null when allowed, or a string when not: a
-// denial message, OR a park signal (when no TTY + park mode) that the calling tool
-// returns verbatim to the engine. `toolName`/`toolArgs` are recorded on the park signal
-// so the engine can re-invoke this exact tool on resume once the user answers.
+// Check file permission. Returns null when allowed (or when no permissions config is
+// supplied — the gate is a no-op), or a string when not allowed: a denial message, OR a
+// park signal (when no TTY + park mode) that the calling tool returns verbatim to the
+// engine. `toolName`/`toolArgs` are recorded on the park signal so the engine can
+// re-invoke this exact tool on resume once the user answers.
 async function checkFileAccess(scope, filePath, permissions, hil = {}, toolName, toolArgs) {
+  // No permissions config => ungated (behaves like the plain, non-permissioned tool).
+  if (!permissions) return null;
+
   const subject = fileKey(scope, filePath);
   const decision = checkPermission(subject, permissions);
 
@@ -757,7 +404,112 @@ async function checkFileAccess(scope, filePath, permissions, hil = {}, toolName,
   return null;
 }
 
-// Factory: readFile with permission checking
+// ---------------------------------------------------------------------------
+// Tool factories
+//
+// Each tool has a SINGLE definition, produced by a `createXTool(permissions, hil)`
+// factory. When `permissions` is falsy the permission gate is skipped and the tool is
+// the plain, ungated variant; when a permissions config is supplied the gate enforces
+// allow/ask/deny before the underlying operation runs. This replaces the previous
+// duplicated permissioned + non-permissioned copies of every tool.
+// ---------------------------------------------------------------------------
+
+// executeAux4: runs any `aux4 <command>`. The SYSTEM_DENY list is enforced
+// unconditionally (even without a permissions config); the configurable allow/ask/deny
+// gate only runs when `permissions` is provided.
+export const createExecuteAux4Tool = (permissions, hil = {}) => tool(
+  async ({ command, stdin, timeout, cwd }) => {
+    // Check system-level deny first (cannot be overridden by config).
+    const systemDenied = checkSystemDeny(command);
+    if (systemDenied) return systemDenied;
+
+    if (permissions) {
+      const decision = checkPermission(command, permissions);
+
+      if (decision === "deny") {
+        return `Permission denied: command "${command}" is not allowed by the permissions configuration.`;
+      }
+
+      if (decision === "ask") {
+        const key = commandKey(command);
+        const resolved = hil.resolutions && hil.resolutions[key];
+        const gate = resolveHumanGate({ resolution: resolved, hasTTY: process.stdin.isTTY, mode: hil.humanInLoop });
+
+        if (gate.action === "resolved") {
+          // Resume path: the parked permission was answered. Affirmative → run; else deny.
+          if (!isAffirmative(resolved.answer)) {
+            return `Command "${command}" was denied by the user.`;
+          }
+        } else if (gate.action === "prompt") {
+          const confirmed = await new Promise((resolve) => {
+            askUserQueue = askUserQueue.then(async () => {
+              const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stderr
+              });
+              process.stderr.write(`\n🔒 The agent wants to execute: aux4 ${command}\nAllow? (Y/n) > `);
+              const answer = await new Promise((res) => {
+                rl.on("line", (line) => {
+                  rl.close();
+                  res(line);
+                });
+                rl.on("close", () => res(""));
+              });
+              const accepted = answer.trim() === "" || answer.trim().toLowerCase() === "y";
+              resolve(accepted);
+            });
+          });
+
+          if (!confirmed) {
+            return `Command "${command}" was denied by the user.`;
+          }
+        } else if (gate.action === "auto") {
+          // auto mode (no TTY): preserve legacy behavior — deny.
+          return `Permission denied: command "${command}" requires user confirmation but session is non-interactive.`;
+        } else {
+          // park mode (no TTY): suspend and wait for a human answer.
+          return makeParkSignal({
+            kind: "permission",
+            tool: "executeAux4",
+            key,
+            question: `The agent wants to run: aux4 ${command}\nAllow?`,
+            command,
+            args: { command, stdin, timeout, cwd },
+            timestamp: Date.now()
+          });
+        }
+      }
+    }
+
+    let argv;
+    try {
+      argv = buildAux4Argv(command);
+    } catch (error) {
+      return `Error parsing command "${command}": ${error.message}. Check that quotes are balanced.`;
+    }
+
+    try {
+      const result = await executeWithTimeout(argv, { stdin, timeout, cwd, displayCmd: `aux4 ${command}` });
+      return result;
+    } catch (error) {
+      if (error.timedOut) {
+        return formatTimeoutMessage(command, timeout, error);
+      }
+      return `Error executing command: ${error.message}`;
+    }
+  },
+  {
+    name: "executeAux4",
+    description: executeAux4Desc,
+    schema: z.object({
+      command: z.string(),
+      stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
+      cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
+    })
+  }
+);
+
 export const createReadFileTool = (permissions, hil = {}) => tool(
   async ({ file, offset, limit }) => {
     try {
@@ -810,7 +562,6 @@ export const createReadFileTool = (permissions, hil = {}) => tool(
   }
 );
 
-// Factory: writeFile with permission checking
 export const createWriteFileTool = (permissions, hil = {}) => tool(
   async ({ file, content }) => {
     try {
@@ -839,7 +590,6 @@ export const createWriteFileTool = (permissions, hil = {}) => tool(
   }
 );
 
-// Factory: editFile with permission checking
 export const createEditFileTool = (permissions, hil = {}) => tool(
   async ({ file, old_string, new_string, replace_all = false }) => {
     try {
@@ -889,7 +639,6 @@ export const createEditFileTool = (permissions, hil = {}) => tool(
   }
 );
 
-// Factory: saveImage with permission checking
 export const createSaveImageTool = (permissions, hil = {}) => tool(
   async ({ imageName, content }) => {
     try {
@@ -900,12 +649,14 @@ export const createSaveImageTool = (permissions, hil = {}) => tool(
       const denied = await checkFileAccess("write", filePath, permissions, hil, "saveImage", { imageName, content });
       if (denied) return denied;
 
+      // Validate that content is base64 image data
       if (!content.startsWith("data:image/") && !content.match(/^[A-Za-z0-9+/]+=*$/)) {
         throw new Error(
           `Invalid image content format. Expected base64 data or data URL (data:image/...), but received: ${content.substring(0, 100)}...`
         );
       }
 
+      // Remove data URL prefix if present
       const base64Data = content.replace(/^data:image\/[^;]+;base64,/, "");
       const buffer = Buffer.from(base64Data, "base64");
 
@@ -927,74 +678,6 @@ export const createSaveImageTool = (permissions, hil = {}) => tool(
   }
 );
 
-// Factory: removeFiles with permission checking
-export const createRemoveFilesTool = (permissions, hil = {}) => tool(
-  async ({ files }) => {
-    try {
-      const currentDirectory = process.cwd();
-      const results = [];
-      const filesToRemove = Array.isArray(files) ? files : [files];
-
-      for (const file of filesToRemove) {
-        const filePath = path.resolve(file);
-
-        if (!filePath.startsWith(currentDirectory)) {
-          results.push(`${file}: Access denied - path outside current directory`);
-          continue;
-        }
-
-        const denied = await checkFileAccess("delete", filePath, permissions, hil, "removeFiles", { files });
-        if (denied) {
-          // A park signal aborts the whole batch — the engine re-invokes removeFiles
-          // with the same file list once the user answers.
-          if (isParkSignal(denied)) return denied;
-          results.push(`${file}: ${denied}`);
-          continue;
-        }
-
-        if (!createdPaths.includes(filePath)) {
-          results.push(`${file}: You can just delete files previously created by the agent`);
-          continue;
-        }
-
-        if (!fs.existsSync(filePath)) {
-          results.push(`${file}: File or directory not found`);
-          const index = createdPaths.indexOf(filePath);
-          if (index > -1) createdPaths.splice(index, 1);
-          continue;
-        }
-
-        try {
-          const stats = fs.statSync(filePath);
-          if (stats.isDirectory()) {
-            fs.rmSync(filePath, { recursive: true, force: true });
-            results.push(`${file}: Directory removed successfully`);
-          } else {
-            fs.unlinkSync(filePath);
-            results.push(`${file}: File removed successfully`);
-          }
-          const index = createdPaths.indexOf(filePath);
-          if (index > -1) createdPaths.splice(index, 1);
-        } catch (removeError) {
-          results.push(`${file}: Error removing - ${removeError.message}`);
-        }
-      }
-
-      return results.join("\n");
-    } catch (e) {
-      return `Error: ${e.message}`;
-    }
-  },
-  {
-    name: "removeFiles",
-    description: removeFilesDesc,
-    schema: z.object({
-      files: z.union([z.string(), z.array(z.string())]).describe("File or directory path(s) to remove. Can be a single string or array of strings.")
-    })
-  }
-);
-
-// Factory: listFiles with permission checking
 export const createListFilesTool = (permissions, hil = {}) => tool(
   async ({ path: targetPath, recursive = true, exclude = "" }) => {
     try {
@@ -1062,7 +745,6 @@ export const createListFilesTool = (permissions, hil = {}) => tool(
   }
 );
 
-// Factory: searchFiles with permission checking
 export const createSearchFilesTool = (permissions, hil = {}) => tool(
   async ({ pattern, path: targetPath, include = "", exclude = "", maxResults = 50 }) => {
     try {
@@ -1142,55 +824,7 @@ export const createSearchFilesTool = (permissions, hil = {}) => tool(
   }
 );
 
-export const saveImageTool = tool(
-  async ({ imageName, content }) => {
-    try {
-      const filePath = path.resolve(imageName);
-      const currentDirectory = process.cwd();
-      if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
-
-      // Validate that content is base64 image data
-      if (!content.startsWith("data:image/") && !content.match(/^[A-Za-z0-9+/]+=*$/)) {
-        throw new Error(
-          `Invalid image content format. Expected base64 data or data URL (data:image/...), but received: ${content.substring(0, 100)}...`
-        );
-      }
-
-      // Remove data URL prefix if present
-      const base64Data = content.replace(/^data:image\/[^;]+;base64,/, "");
-      const buffer = Buffer.from(base64Data, "base64");
-
-      // Check if file already exists
-      const fileExists = fs.existsSync(filePath);
-
-      fs.writeFileSync(filePath, buffer);
-
-      // Track the created file only if it's new
-      if (!fileExists) {
-        createdPaths.push(filePath);
-      }
-
-      return `Image saved to ${imageName}`;
-    } catch (e) {
-      if (e.code === "ENOENT") {
-        return "Directory not found";
-      } else if (e.code === "EACCES") {
-        return "Access denied";
-      }
-      return e.message;
-    }
-  },
-  {
-    name: "saveImage",
-    description: saveImageDesc,
-    schema: z.object({
-      imageName: z.string(),
-      content: z.string()
-    })
-  }
-);
-
-export const removeFilesTool = tool(
+export const createRemoveFilesTool = (permissions, hil = {}) => tool(
   async ({ files }) => {
     try {
       const currentDirectory = process.cwd();
@@ -1206,6 +840,15 @@ export const removeFilesTool = tool(
           continue;
         }
 
+        const denied = await checkFileAccess("delete", filePath, permissions, hil, "removeFiles", { files });
+        if (denied) {
+          // A park signal aborts the whole batch — the engine re-invokes removeFiles
+          // with the same file list once the user answers.
+          if (isParkSignal(denied)) return denied;
+          results.push(`${file}: ${denied}`);
+          continue;
+        }
+
         // Safety check - only allow removal of files/directories created by the agent
         if (!createdPaths.includes(filePath)) {
           results.push(`${file}: You can just delete files previously created by the agent`);
@@ -1217,9 +860,7 @@ export const removeFilesTool = tool(
           results.push(`${file}: File or directory not found`);
           // Remove from tracking even if it doesn't exist
           const index = createdPaths.indexOf(filePath);
-          if (index > -1) {
-            createdPaths.splice(index, 1);
-          }
+          if (index > -1) createdPaths.splice(index, 1);
           continue;
         }
 
@@ -1232,12 +873,8 @@ export const removeFilesTool = tool(
             fs.unlinkSync(filePath);
             results.push(`${file}: File removed successfully`);
           }
-
-          // Remove from tracking array
           const index = createdPaths.indexOf(filePath);
-          if (index > -1) {
-            createdPaths.splice(index, 1);
-          }
+          if (index > -1) createdPaths.splice(index, 1);
         } catch (removeError) {
           results.push(`${file}: Error removing - ${removeError.message}`);
         }
@@ -1257,87 +894,24 @@ export const removeFilesTool = tool(
   }
 );
 
-export const searchFilesTool = tool(
-  async ({ pattern, path: targetPath, include = "", exclude = "", maxResults = 50 }) => {
-    try {
-      const currentDirectory = process.cwd();
-      const expandedPath = expandTildePath(targetPath || currentDirectory);
-      const directory = path.resolve(expandedPath);
+export const createDirectoryTool = tool(
+  async ({ path: dirPath }) => {
+    const directory = path.resolve(dirPath);
+    const currentDirectory = process.cwd();
+    if (!directory.startsWith(currentDirectory)) throw new Error("Access denied");
+    if (fs.existsSync(directory)) return "directory already exists";
+    fs.mkdirSync(directory, { recursive: true });
 
-      if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
-      if (!fs.existsSync(directory)) return "Directory not found";
+    // Track the created directory
+    createdPaths.push(directory);
 
-      const includeExtensions = include ? include.split(",").map(ext => ext.trim().toLowerCase()) : [];
-      const excludePrefixes = exclude ? exclude.split(",").map(p => p.trim()) : [];
-      const lowerPattern = pattern.toLowerCase();
-      const results = [];
-
-      function searchDir(dir) {
-        if (results.length >= maxResults) return;
-
-        let entries;
-        try {
-          entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-
-        for (const entry of entries) {
-          if (results.length >= maxResults) return;
-
-          const fullPath = path.join(dir, entry.name);
-          const relPath = path.relative(currentDirectory, fullPath);
-
-          if (excludePrefixes.some(prefix => relPath.startsWith(prefix))) continue;
-
-          if (entry.isDirectory()) {
-            searchDir(fullPath);
-          } else if (entry.isFile()) {
-            if (includeExtensions.length > 0) {
-              const ext = path.extname(entry.name).slice(1).toLowerCase();
-              if (!includeExtensions.includes(ext)) continue;
-            }
-
-            try {
-              const content = fs.readFileSync(fullPath, { encoding: "utf-8" });
-              const lines = content.split("\n");
-              for (let i = 0; i < lines.length; i++) {
-                if (results.length >= maxResults) return;
-                if (lines[i].toLowerCase().includes(lowerPattern)) {
-                  const line = lines[i].length > 500 ? lines[i].slice(0, 500) + "..." : lines[i];
-                  results.push(`${relPath}:${i + 1}: ${line}`);
-                }
-              }
-            } catch {
-              // Skip binary or unreadable files
-            }
-          }
-        }
-      }
-
-      searchDir(directory);
-
-      if (results.length === 0) return "No matches found";
-      const output = results.join("\n");
-      if (output.length > 50000) {
-        return output.slice(0, 50000) + `\n\n[Output truncated: ${results.length} matches, ${output.length} chars total]`;
-      }
-      return output;
-    } catch (e) {
-      if (e.code === "ENOENT") return "Directory not found";
-      if (e.code === "EACCES") return "Access denied";
-      return e.message;
-    }
+    return "directory created";
   },
   {
-    name: "searchFiles",
-    description: searchFilesDesc,
+    name: "createDirectory",
+    description: createDirectoryDesc,
     schema: z.object({
-      pattern: z.string(),
-      path: z.string().optional(),
-      include: z.string().optional(),
-      exclude: z.string().optional(),
-      maxResults: z.number().optional()
+      path: z.string()
     })
   }
 );
@@ -1588,6 +1162,19 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
 
 export const searchContextTool = createSearchContextTool();
 
+// ---------------------------------------------------------------------------
+// Plain (ungated) tool instances — the single factories with no permissions config.
+// Kept as named exports for the default tool map and any external importers.
+// ---------------------------------------------------------------------------
+export const readLocalFileTool = createReadFileTool();
+export const writeLocalFileTool = createWriteFileTool();
+export const editLocalFileTool = createEditFileTool();
+export const saveImageTool = createSaveImageTool();
+export const listFilesTool = createListFilesTool();
+export const searchFilesTool = createSearchFilesTool();
+export const removeFilesTool = createRemoveFilesTool();
+export const executeAux4CliTool = createExecuteAux4Tool();
+
 // Wrap a built tool with the policy enforcement hook. Read-only tools are passed
 // through untouched (exempt for speed). Consequential tools get gated: before the
 // underlying tool runs, the policy decides allow/deny (reading the live token usage
@@ -1631,16 +1218,18 @@ export function createTools(config = {}) {
   // answer on the resume run so the parked interaction resolves.
   const hil = { humanInLoop: humanInLoop || "park", resolutions: resolutions || {} };
 
+  // Each factory receives `permissions`; when it's falsy the gate is a no-op and the
+  // tool behaves exactly like its plain variant (SYSTEM_DENY on executeAux4 still applies).
   const base = {
-    readFile: permissions ? createReadFileTool(permissions, hil) : readLocalFileTool,
-    writeFile: permissions ? createWriteFileTool(permissions, hil) : writeLocalFileTool,
-    editFile: permissions ? createEditFileTool(permissions, hil) : editLocalFileTool,
-    saveImage: permissions ? createSaveImageTool(permissions, hil) : saveImageTool,
-    listFiles: permissions ? createListFilesTool(permissions, hil) : listFilesTool,
-    searchFiles: permissions ? createSearchFilesTool(permissions, hil) : searchFilesTool,
+    readFile: createReadFileTool(permissions, hil),
+    writeFile: createWriteFileTool(permissions, hil),
+    editFile: createEditFileTool(permissions, hil),
+    saveImage: createSaveImageTool(permissions, hil),
+    listFiles: createListFilesTool(permissions, hil),
+    searchFiles: createSearchFilesTool(permissions, hil),
     createDirectory: createDirectoryTool,
-    removeFiles: permissions ? createRemoveFilesTool(permissions, hil) : removeFilesTool,
-    executeAux4: permissions ? createExecuteAux4Tool(permissions, hil) : executeAux4CliTool,
+    removeFiles: createRemoveFilesTool(permissions, hil),
+    executeAux4: createExecuteAux4Tool(permissions, hil),
     searchContext: createSearchContextTool(storage, embeddingsConfig),
     askUser: createAskUserTool(hil),
     currentDateTime: currentDateTimeTool,
