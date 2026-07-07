@@ -8,6 +8,8 @@ import { tool } from "@langchain/core/tools";
 import LlmStore from "./LlmStore.js";
 import { getEmbeddings } from "./Embeddings.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
+import { buildAux4Argv } from "./CommandParser.js";
+import { makeParkSignal, isParkSignal, questionKey, commandKey, fileKey, isAffirmative, resolveHumanGate } from "./HumanInLoop.js";
 
 // Import tool descriptions
 import readFileDesc from "../docs/tools/readFile.md?raw";
@@ -312,7 +314,7 @@ export const createDirectoryTool = tool(
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
 
-function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
+function executeWithTimeout(argv, { stdin, timeout, cwd, displayCmd } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
   const tmpDir = os.tmpdir();
@@ -337,7 +339,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
     };
     if (cwd) spawnOptions.cwd = cwd;
 
-    const child = spawn("sh", ["-c", cmd], spawnOptions);
+    const child = spawn(argv[0], argv.slice(1), spawnOptions);
 
     if (stdin) {
       child.stdin.write(stdin);
@@ -361,7 +363,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
         // Try to attach to aux4 jobs
         try {
           const attachResult = spawnSync("aux4", [
-            "jobs", "attach", String(child.pid), cmd,
+            "jobs", "attach", String(child.pid), displayCmd || argv.join(" "),
             "--stdout", stdoutPath, "--stderr", stderrPath
           ], { encoding: "utf-8", timeout: 5000 });
 
@@ -507,8 +509,15 @@ export const executeAux4CliTool = tool(
       }
     }
 
+    let argv;
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
+      argv = buildAux4Argv(command);
+    } catch (error) {
+      return `Error parsing command "${command}": ${error.message}. Check that quotes are balanced.`;
+    }
+
+    try {
+      const result = await executeWithTimeout(argv, { stdin, timeout, cwd, displayCmd: `aux4 ${command}` });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -581,7 +590,7 @@ export function checkPermission(subject, permissions = {}) {
 const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
 
 // Factory that wraps executeAux4 with permission checking
-export const createExecuteAux4Tool = (permissions) => tool(
+export const createExecuteAux4Tool = (permissions, hil = {}) => tool(
   async ({ command, stdin, timeout, cwd }) => {
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
@@ -597,36 +606,64 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     if (decision === "ask") {
-      if (!process.stdin.isTTY) {
-        return `Permission denied: command "${command}" requires user confirmation but session is non-interactive.`;
-      }
+      const key = commandKey(command);
+      const resolved = hil.resolutions && hil.resolutions[key];
+      const gate = resolveHumanGate({ resolution: resolved, hasTTY: process.stdin.isTTY, mode: hil.humanInLoop });
 
-      const confirmed = await new Promise((resolve) => {
-        askUserQueue = askUserQueue.then(async () => {
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stderr
-          });
-          process.stderr.write(`\n🔒 The agent wants to execute: aux4 ${command}\nAllow? (Y/n) > `);
-          const answer = await new Promise((res) => {
-            rl.on("line", (line) => {
-              rl.close();
-              res(line);
+      if (gate.action === "resolved") {
+        // Resume path: the parked permission was answered. Affirmative → run; else deny.
+        if (!isAffirmative(resolved.answer)) {
+          return `Command "${command}" was denied by the user.`;
+        }
+      } else if (gate.action === "prompt") {
+        const confirmed = await new Promise((resolve) => {
+          askUserQueue = askUserQueue.then(async () => {
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stderr
             });
-            rl.on("close", () => res(""));
+            process.stderr.write(`\n🔒 The agent wants to execute: aux4 ${command}\nAllow? (Y/n) > `);
+            const answer = await new Promise((res) => {
+              rl.on("line", (line) => {
+                rl.close();
+                res(line);
+              });
+              rl.on("close", () => res(""));
+            });
+            const accepted = answer.trim() === "" || answer.trim().toLowerCase() === "y";
+            resolve(accepted);
           });
-          const accepted = answer.trim() === "" || answer.trim().toLowerCase() === "y";
-          resolve(accepted);
         });
-      });
 
-      if (!confirmed) {
-        return `Command "${command}" was denied by the user.`;
+        if (!confirmed) {
+          return `Command "${command}" was denied by the user.`;
+        }
+      } else if (gate.action === "auto") {
+        // auto mode (no TTY): preserve legacy behavior — deny.
+        return `Permission denied: command "${command}" requires user confirmation but session is non-interactive.`;
+      } else {
+        // park mode (no TTY): suspend and wait for a human answer.
+        return makeParkSignal({
+          kind: "permission",
+          tool: "executeAux4",
+          key,
+          question: `The agent wants to run: aux4 ${command}\nAllow?`,
+          command,
+          args: { command, stdin, timeout, cwd },
+          timestamp: Date.now()
+        });
       }
     }
 
+    let argv;
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
+      argv = buildAux4Argv(command);
+    } catch (error) {
+      return `Error parsing command "${command}": ${error.message}. Check that quotes are balanced.`;
+    }
+
+    try {
+      const result = await executeWithTimeout(argv, { stdin, timeout, cwd, displayCmd: `aux4 ${command}` });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -671,25 +708,57 @@ async function askFilePermission(scope, filePath) {
   });
 }
 
-// Helper to check file permission and return denial message or null
-async function checkFileAccess(scope, filePath, permissions) {
-  const subject = `file:${scope}:${filePath}`;
+// Helper to check file permission. Returns null when allowed, or a string when not: a
+// denial message, OR a park signal (when no TTY + park mode) that the calling tool
+// returns verbatim to the engine. `toolName`/`toolArgs` are recorded on the park signal
+// so the engine can re-invoke this exact tool on resume once the user answers.
+async function checkFileAccess(scope, filePath, permissions, hil = {}, toolName, toolArgs) {
+  const subject = fileKey(scope, filePath);
   const decision = checkPermission(subject, permissions);
 
   if (decision === "deny") {
     return `Permission denied: ${scope} "${filePath}" is not allowed by the permissions configuration.`;
   }
   if (decision === "ask") {
-    const confirmed = await askFilePermission(scope, filePath);
-    if (!confirmed) {
+    const resolved = hil.resolutions && hil.resolutions[subject];
+    const gate = resolveHumanGate({ resolution: resolved, hasTTY: process.stdin.isTTY, mode: hil.humanInLoop });
+
+    if (gate.action === "resolved") {
+      // Resume path: the parked file permission was answered.
+      if (!isAffirmative(resolved.answer)) {
+        return `File ${scope} "${filePath}" was denied by the user.`;
+      }
+      return null;
+    }
+
+    if (gate.action === "prompt") {
+      const confirmed = await askFilePermission(scope, filePath);
+      if (!confirmed) {
+        return `File ${scope} "${filePath}" was denied by the user.`;
+      }
+      return null;
+    }
+
+    if (gate.action === "auto") {
+      // auto mode (no TTY): preserve legacy behavior — deny.
       return `File ${scope} "${filePath}" was denied by the user.`;
     }
+
+    // park mode (no TTY): suspend and wait for a human answer.
+    return makeParkSignal({
+      kind: "permission",
+      tool: toolName,
+      key: subject,
+      question: `The agent wants to ${scope} file: ${filePath}\nAllow?`,
+      args: toolArgs,
+      timestamp: Date.now()
+    });
   }
   return null;
 }
 
 // Factory: readFile with permission checking
-export const createReadFileTool = (permissions) => tool(
+export const createReadFileTool = (permissions, hil = {}) => tool(
   async ({ file, offset, limit }) => {
     try {
       const expandedPath = expandTildePath(file);
@@ -697,7 +766,7 @@ export const createReadFileTool = (permissions) => tool(
       const currentDirectory = process.cwd();
       if (!isReadOnlyPathAllowed(filePath, currentDirectory)) throw new Error("Access denied");
 
-      const denied = await checkFileAccess("read", filePath, permissions);
+      const denied = await checkFileAccess("read", filePath, permissions, hil, "readFile", { file, offset, limit });
       if (denied) return denied;
 
       if (!fs.existsSync(filePath)) throw new Error("File not found");
@@ -742,14 +811,14 @@ export const createReadFileTool = (permissions) => tool(
 );
 
 // Factory: writeFile with permission checking
-export const createWriteFileTool = (permissions) => tool(
+export const createWriteFileTool = (permissions, hil = {}) => tool(
   async ({ file, content }) => {
     try {
       const filePath = path.resolve(file);
       const currentDirectory = process.cwd();
       if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
 
-      const denied = await checkFileAccess("write", filePath, permissions);
+      const denied = await checkFileAccess("write", filePath, permissions, hil, "writeFile", { file, content });
       if (denied) return denied;
 
       const fileExists = fs.existsSync(filePath);
@@ -771,14 +840,14 @@ export const createWriteFileTool = (permissions) => tool(
 );
 
 // Factory: editFile with permission checking
-export const createEditFileTool = (permissions) => tool(
+export const createEditFileTool = (permissions, hil = {}) => tool(
   async ({ file, old_string, new_string, replace_all = false }) => {
     try {
       const filePath = path.resolve(file);
       const currentDirectory = process.cwd();
       if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
 
-      const denied = await checkFileAccess("write", filePath, permissions);
+      const denied = await checkFileAccess("write", filePath, permissions, hil, "editFile", { file, old_string, new_string, replace_all });
       if (denied) return denied;
 
       if (!fs.existsSync(filePath)) return "File not found";
@@ -821,14 +890,14 @@ export const createEditFileTool = (permissions) => tool(
 );
 
 // Factory: saveImage with permission checking
-export const createSaveImageTool = (permissions) => tool(
+export const createSaveImageTool = (permissions, hil = {}) => tool(
   async ({ imageName, content }) => {
     try {
       const filePath = path.resolve(imageName);
       const currentDirectory = process.cwd();
       if (!filePath.startsWith(currentDirectory)) throw new Error("Access denied");
 
-      const denied = await checkFileAccess("write", filePath, permissions);
+      const denied = await checkFileAccess("write", filePath, permissions, hil, "saveImage", { imageName, content });
       if (denied) return denied;
 
       if (!content.startsWith("data:image/") && !content.match(/^[A-Za-z0-9+/]+=*$/)) {
@@ -859,7 +928,7 @@ export const createSaveImageTool = (permissions) => tool(
 );
 
 // Factory: removeFiles with permission checking
-export const createRemoveFilesTool = (permissions) => tool(
+export const createRemoveFilesTool = (permissions, hil = {}) => tool(
   async ({ files }) => {
     try {
       const currentDirectory = process.cwd();
@@ -874,8 +943,11 @@ export const createRemoveFilesTool = (permissions) => tool(
           continue;
         }
 
-        const denied = await checkFileAccess("delete", filePath, permissions);
+        const denied = await checkFileAccess("delete", filePath, permissions, hil, "removeFiles", { files });
         if (denied) {
+          // A park signal aborts the whole batch — the engine re-invokes removeFiles
+          // with the same file list once the user answers.
+          if (isParkSignal(denied)) return denied;
           results.push(`${file}: ${denied}`);
           continue;
         }
@@ -923,7 +995,7 @@ export const createRemoveFilesTool = (permissions) => tool(
 );
 
 // Factory: listFiles with permission checking
-export const createListFilesTool = (permissions) => tool(
+export const createListFilesTool = (permissions, hil = {}) => tool(
   async ({ path: targetPath, recursive = true, exclude = "" }) => {
     try {
       const currentDirectory = process.cwd();
@@ -933,7 +1005,7 @@ export const createListFilesTool = (permissions) => tool(
       const excludePrefixes = (exclude && exclude.split(",")) || [];
       if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
 
-      const denied = await checkFileAccess("read", directory, permissions);
+      const denied = await checkFileAccess("read", directory, permissions, hil, "listFiles", { path: targetPath, recursive, exclude });
       if (denied) return denied;
 
       const entries = fs.readdirSync(directory, { withFileTypes: true });
@@ -991,7 +1063,7 @@ export const createListFilesTool = (permissions) => tool(
 );
 
 // Factory: searchFiles with permission checking
-export const createSearchFilesTool = (permissions) => tool(
+export const createSearchFilesTool = (permissions, hil = {}) => tool(
   async ({ pattern, path: targetPath, include = "", exclude = "", maxResults = 50 }) => {
     try {
       const currentDirectory = process.cwd();
@@ -1000,7 +1072,7 @@ export const createSearchFilesTool = (permissions) => tool(
 
       if (!isReadOnlyPathAllowed(directory, currentDirectory)) throw new Error("Access denied");
 
-      const denied = await checkFileAccess("read", directory, permissions);
+      const denied = await checkFileAccess("read", directory, permissions, hil, "searchFiles", { pattern, path: targetPath, include, exclude, maxResults });
       if (denied) return denied;
 
       if (!fs.existsSync(directory)) return "Directory not found";
@@ -1378,36 +1450,56 @@ export const createReadSkillTool = (skillsDir) => tool(
   }
 );
 
-export const createAskUserTool = () => tool(
+export const createAskUserTool = (hil = {}) => tool(
   async ({ question }) => {
-    if (!process.stdin.isTTY) {
+    const key = questionKey(question);
+    const resolved = hil.resolutions && hil.resolutions[key];
+    const gate = resolveHumanGate({ resolution: resolved, hasTTY: process.stdin.isTTY, mode: hil.humanInLoop });
+
+    if (gate.action === "resolved") {
+      // Resume path: the parked question was answered — feed the answer back.
+      return `User responded: ${resolved.answer !== undefined ? resolved.answer : ""}`;
+    }
+
+    if (gate.action === "prompt") {
+      const ask = () => new Promise((resolve) => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stderr
+        });
+        process.stderr.write(`\n🤖 ${question}\n> `);
+        rl.on("line", (answer) => {
+          rl.close();
+          resolve(answer);
+        });
+        rl.on("close", () => {
+          resolve("");
+        });
+      });
+
+      // Serialize concurrent calls to avoid stdin conflicts
+      return new Promise((resolve) => {
+        askUserQueue = askUserQueue.then(async () => {
+          const answer = await ask();
+          resolve(`User responded: ${answer}`);
+        });
+      });
+    }
+
+    if (gate.action === "auto") {
+      // auto mode (no TTY): preserve legacy behavior — proceed without the answer.
       return "Non-interactive session detected (no TTY). Proceed with your best judgment based on the available context.";
     }
 
-    const ask = () => new Promise((resolve) => {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stderr
-      });
-      process.stderr.write(`\n🤖 ${question}\n> `);
-      rl.on("line", (answer) => {
-        rl.close();
-        resolve(answer);
-      });
-      rl.on("close", () => {
-        resolve("");
-      });
+    // park mode (no TTY): suspend and wait for a human answer.
+    return makeParkSignal({
+      kind: "question",
+      tool: "askUser",
+      key,
+      question,
+      args: { question },
+      timestamp: Date.now()
     });
-
-    // Serialize concurrent calls to avoid stdin conflicts
-    const result = new Promise((resolve) => {
-      askUserQueue = askUserQueue.then(async () => {
-        const answer = await ask();
-        resolve(`User responded: ${answer}`);
-      });
-    });
-
-    return result;
   },
   {
     name: "askUser",
@@ -1418,7 +1510,9 @@ export const createAskUserTool = () => tool(
   }
 );
 
-export const askUserTool = createAskUserTool();
+// Standalone default keeps legacy auto behavior (used only when no tools config is set,
+// i.e. no history file to persist a parked question against).
+export const askUserTool = createAskUserTool({ humanInLoop: "auto" });
 
 export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig = {}) => tool(
   async ({ query, storage, limit = 5, source, embeddingsType = "openai", embeddingsConfig = {} }) => {
@@ -1529,20 +1623,26 @@ function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
 }
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage } = config;
+  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage, humanInLoop, resolutions } = config;
+
+  // Human-in-the-loop parking config, threaded into every tool with an ask-gate. When
+  // no TTY and mode is "park" (default), askUser / permission `ask:` prompts suspend the
+  // turn instead of auto-proceeding/auto-denying. `resolutions` carries the user's
+  // answer on the resume run so the parked interaction resolves.
+  const hil = { humanInLoop: humanInLoop || "park", resolutions: resolutions || {} };
 
   const base = {
-    readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
-    writeFile: permissions ? createWriteFileTool(permissions) : writeLocalFileTool,
-    editFile: permissions ? createEditFileTool(permissions) : editLocalFileTool,
-    saveImage: permissions ? createSaveImageTool(permissions) : saveImageTool,
-    listFiles: permissions ? createListFilesTool(permissions) : listFilesTool,
-    searchFiles: permissions ? createSearchFilesTool(permissions) : searchFilesTool,
+    readFile: permissions ? createReadFileTool(permissions, hil) : readLocalFileTool,
+    writeFile: permissions ? createWriteFileTool(permissions, hil) : writeLocalFileTool,
+    editFile: permissions ? createEditFileTool(permissions, hil) : editLocalFileTool,
+    saveImage: permissions ? createSaveImageTool(permissions, hil) : saveImageTool,
+    listFiles: permissions ? createListFilesTool(permissions, hil) : listFilesTool,
+    searchFiles: permissions ? createSearchFilesTool(permissions, hil) : searchFilesTool,
     createDirectory: createDirectoryTool,
-    removeFiles: permissions ? createRemoveFilesTool(permissions) : removeFilesTool,
-    executeAux4: permissions ? createExecuteAux4Tool(permissions) : executeAux4CliTool,
+    removeFiles: permissions ? createRemoveFilesTool(permissions, hil) : removeFilesTool,
+    executeAux4: permissions ? createExecuteAux4Tool(permissions, hil) : executeAux4CliTool,
     searchContext: createSearchContextTool(storage, embeddingsConfig),
-    askUser: createAskUserTool(),
+    askUser: createAskUserTool(hil),
     currentDateTime: currentDateTimeTool,
     readReference: createReadReferenceTool(references),
     readSkill: createReadSkillTool(skills)

@@ -67,6 +67,8 @@ Key variables (from the package help):
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
 - skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
+- humanInLoop (default: "park") — how to handle a no-TTY `askUser` / permission `ask:`: `park` (suspend and record the question) or `auto` (legacy auto-proceed/auto-deny). See [Human-in-the-Loop](#human-in-the-loop).
+- answer (default: "") — answer to a parked question when resuming; when omitted on resume, the question is treated as the answer. See [Human-in-the-Loop](#human-in-the-loop).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples:
@@ -641,7 +643,7 @@ The agent comes with a set of built-in tools that the LLM can call during execut
 
 The `askUser` tool lets the agent prompt the user interactively when it needs clarification, a preference, or a decision before proceeding. The question is displayed on stderr and the user types their response on stdin.
 
-**Non-interactive sessions:** When no TTY is available (e.g., piped input), the tool returns a message telling the agent to proceed with its best judgment.
+**Non-interactive sessions:** When no TTY is available (e.g., cron heartbeat, jobs, CI), the default `humanInLoop: park` mode suspends the run and records the question instead of silently proceeding. See [Human-in-the-Loop](#human-in-the-loop). With `humanInLoop: auto` the tool returns a message telling the agent to proceed with its best judgment (the legacy behavior).
 
 **Note:** The agent is instructed to always call `askUser` alone, never in parallel with other tools, to avoid stdin conflicts.
 
@@ -672,6 +674,60 @@ The `readSkill` tool gives the agent on-demand access to skill instructions from
 - **Read a skill:** Call with a `skill` parameter (e.g., `code-review`) to read the full `SKILL.md` content.
 
 By default, the skills directory is `.agents/skills` relative to the working directory. Override with `--skills <path>`.
+
+---
+
+## Human-in-the-Loop
+
+The agent can pause for a human when it needs an answer (`askUser` tool) or confirmation for a permission `ask:` rule. On a TTY it asks interactively. Without a TTY — the common case for an autonomous agent driven by a cron heartbeat, a job, or CI — the `humanInLoop` mode controls what happens:
+
+| Mode | No-TTY `askUser` | No-TTY permission `ask:` |
+|------|------------------|--------------------------|
+| `park` (default) | Suspend and record the question | Suspend and record the request |
+| `auto` | Return "proceed with best judgment" | Deny |
+
+`auto` is the legacy behavior: questions silently vanish and permission prompts silently fail. `park` makes the agent stop and wait for a human instead.
+
+```yaml
+config:
+  agent:
+    model:
+      type: openai
+      config:
+        model: gpt-5-mini
+    humanInLoop: park    # default; use "auto" for the legacy auto-proceed/auto-deny
+```
+
+### Parking
+
+In `park` mode, the first no-TTY `askUser` or permission `ask:` **suspends the turn**:
+
+1. The pending question — its text, the tool that asked, and (for permissions) the requested command or file — is recorded in the `--history` file under a `pendingQuestion` field.
+2. A single-line structured marker is written to stderr for a supervisor (for example `agent/agent`'s heartbeat, or the Conductor) to parse and surface to a human:
+
+   ```text
+   AUX4_PENDING_QUESTION {"type":"pending_question","kind":"question","tool":"askUser","question":"Which environment — staging or production?","key":"ask:Which environment — staging or production?","timestamp":1720000000000}
+   ```
+
+3. The process exits with code `10` (distinct from success `0` and error) so a supervisor can detect "needs input" without parsing output.
+
+Parking needs a history file to record and resume from. With no `--history`, the mode falls back to `auto`.
+
+### Resuming
+
+Run `ask` again with the **same `--history`**. Provide the answer with `--answer "<text>"`, or simply pass it as the next question (when a pending question exists and no `--answer` is given, the question is treated as the answer):
+
+```bash
+# 1. Parks (no TTY): records the question, emits the marker, exits 10.
+aux4 ai agent ask --config --history session.json "Deploy the app to the right environment"
+
+# 2. Resume with the answer against the same history; the loop continues where it parked.
+aux4 ai agent ask --config --history session.json --answer "staging" ""
+```
+
+The answer is fed back to the waiting tool call: for `askUser` it becomes the tool result; for a permission it decides allow/deny, and on allow the original command runs. The agent loop then continues. If it parks again on a further question, repeat the resume.
+
+**Note:** TTY behavior is always unchanged — interactive `askUser` and permission prompts work exactly as before regardless of `humanInLoop`.
 
 ---
 

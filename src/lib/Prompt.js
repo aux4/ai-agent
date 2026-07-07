@@ -20,6 +20,7 @@ import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
 import { LoopBudget } from "./LoopBudget.js";
 import { HistoryLock, writeFileAtomic } from "./HistoryLock.js";
+import { parseParkSignal, isParkSignal, emitPendingMarker, findParkedResult, applyPendingResolution } from "./HumanInLoop.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -51,6 +52,11 @@ class Prompt {
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
+    // Human-in-the-loop parking state. `pendingQuestion` is a durable record of a
+    // question/permission the agent parked on when no TTY was available; `paused` marks
+    // that the current turn ended parked (the executable exits with PENDING_EXIT_CODE).
+    this.pendingQuestion = null;
+    this.paused = false;
     this.mcpClient = null;
     this.apiType = config.api || "chat";
 
@@ -152,6 +158,10 @@ class Prompt {
           cached: historyData.tokenUsage.cached || 0,
           total: historyData.tokenUsage.total || 0
         };
+      }
+      // Restore a parked question so this run can resolve it with the user's answer.
+      if (historyData.pendingQuestion && typeof historyData.pendingQuestion === "object") {
+        this.pendingQuestion = historyData.pendingQuestion;
       }
     }
   }
@@ -342,6 +352,25 @@ class Prompt {
 
               const toolResponse = await tool.invoke(invokeArgs);
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+              // Human-in-the-loop park signal: the tool needs a human answer but there
+              // is no TTY. Stash the record (with this call's id) and store a readable
+              // placeholder as the tool result so the message history stays valid; the
+              // engine terminates the turn after collecting all results.
+              const parkRecord = parseParkSignal(toolResponse);
+              if (parkRecord) {
+                parkRecord.toolCallId = toolCall.id;
+                console.error(`[tool] ${toolCall.name} => parked (awaiting user response)`);
+                return {
+                  role: "tool",
+                  content: `[Paused — awaiting the user's answer to: ${parkRecord.question}]`,
+                  tool_call_id: toolCall.id,
+                  name: toolCall.name,
+                  timestamp: Date.now(),
+                  parked: parkRecord
+                };
+              }
+
               const preview = typeof toolResponse === "string" ? toolResponse.slice(0, 100) : "";
               console.error(`[tool] ${toolCall.name} => done (${elapsed}s) ${preview}`);
               const entry = {
@@ -373,6 +402,19 @@ class Prompt {
         );
 
         this.messages.push(...toolResults);
+
+        // If any tool parked (needs a human answer, no TTY), suspend the turn: record
+        // the pending question durably, emit the structured marker for a supervisor, and
+        // stop — do NOT recurse. The next run resolves it via resolvePending().
+        const parkedEntry = findParkedResult(toolResults);
+        if (parkedEntry) {
+          this.pendingQuestion = parkedEntry.parked;
+          this.paused = true;
+          this.saveHistory(true);
+          emitPendingMarker(this.pendingQuestion);
+          return "⏸ Paused: waiting for the user to answer a pending question. Run the agent again with the answer to continue.";
+        }
+
         this.saveHistory();
 
         return await this.execute();
@@ -579,10 +621,15 @@ class Prompt {
 
       if (simplifiedMessages.length === 0) return;
 
-      const data = JSON.stringify({
+      const historyObject = {
         messages: simplifiedMessages,
         tokenUsage: this.tokenUsage
-      });
+      };
+      // Persist a parked question so a later run can resolve it. Cleared once resolved.
+      if (this.pendingQuestion) {
+        historyObject.pendingQuestion = this.pendingQuestion;
+      }
+      const data = JSON.stringify(historyObject);
       if (data.length < 3) return;
 
       // The old size heuristic ("skip write if the on-disk file is >1.5x larger")
@@ -598,6 +645,64 @@ class Prompt {
     } catch (error) {
       console.error("Error writing history file:", error.message);
     }
+  }
+
+  // Resolve a parked question with the user's answer, feed it to the waiting tool call,
+  // and continue the agent loop. For a question (askUser) the answer text becomes the
+  // tool result; for a permission the answer decides allow/deny and, when allowed, the
+  // original tool (e.g. executeAux4) is re-invoked so it actually runs. Returns the
+  // agent's final answer (or a fresh pause message if it parks again).
+  async resolvePending(answer) {
+    const pending = this.pendingQuestion;
+    if (!pending) return null;
+
+    const resolutions = { [pending.key]: { answer } };
+
+    // Rebuild the tools with the resolution so the parked ask-gate is satisfied. Policy
+    // wrapping is intentionally dropped: the original (parked) call already passed the
+    // policy; this re-invocation only completes it and must not be double-counted.
+    const resumeToolsConfig = { ...this.toolsConfig, resolutions };
+    delete resumeToolsConfig.policy;
+    delete resumeToolsConfig.getUsage;
+    const tools = createTools(resumeToolsConfig);
+
+    let resolvedResult;
+    const tool = tools[pending.tool];
+    if (tool) {
+      try {
+        resolvedResult = await tool.invoke(pending.args || {});
+      } catch (error) {
+        resolvedResult = `Error resolving the parked ${pending.tool} call: ${error.message}`;
+      }
+    } else {
+      resolvedResult = `User responded: ${answer}`;
+    }
+
+    // Should never re-park (the resolution grants the request); guard defensively.
+    if (isParkSignal(resolvedResult)) {
+      resolvedResult = "[The parked request could not be resolved automatically.]";
+    }
+
+    // Feed the result to the waiting tool call in the message history.
+    applyPendingResolution(this.messages, pending.toolCallId, resolvedResult);
+
+    this.pendingQuestion = null;
+    this.paused = false;
+    this.saveHistory(true);
+
+    const answerText = await this.execute();
+    if (this.callback) {
+      this.callback(`${answerText}`);
+    }
+    return answerText;
+  }
+
+  // Re-emit the pending-question marker (e.g. when resumed with no answer available) so
+  // a supervisor is reminded the agent is still waiting.
+  reemitPending() {
+    if (!this.pendingQuestion) return;
+    this.paused = true;
+    emitPendingMarker(this.pendingQuestion);
   }
 
   async close() {

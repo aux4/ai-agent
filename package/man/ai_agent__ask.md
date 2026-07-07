@@ -13,7 +13,8 @@ Key features:
 - **Structured output** — constrain responses to a JSON schema
 - **Streaming** — print tokens as they arrive with `--stream true`
 - **Built-in tools** — the agent can call tools (readFile, writeFile, editFile, searchFiles, executeAux4, askUser, etc.) during execution
-- **askUser tool** — when the agent needs clarification it can prompt the user interactively; in non-interactive sessions it proceeds with best judgment
+- **askUser tool** — when the agent needs clarification it can prompt the user; on a TTY it asks interactively, and in a non-interactive session it parks the question (see below)
+- **Human-in-the-loop parking** — with `--humanInLoop park` (the default), a no-TTY `askUser` call or a permission `ask:` prompt suspends the run instead of silently auto-proceeding/auto-denying: the question is recorded in the history file, a structured `AUX4_PENDING_QUESTION` marker is emitted for a supervisor, and the turn ends with exit code `10`. Re-run with `--answer` (or the next question) to resume
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Loop budget** — a safety cap on the tool-execution loop: an always-on iteration cap (`--maxIterations`, default 50) plus optional token/time caps (`--budget`). When a limit trips the loop stops cleanly, appends a `[budget-exceeded]` note, persists history, and exits with code 7
@@ -24,7 +25,7 @@ Key features:
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--humanInLoop <park|auto>] [--answer <text>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -51,6 +52,8 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: skills)
+--humanInLoop    How to handle a no-TTY askUser / permission ask: `park` (suspend and record the question) or `auto` (legacy auto-proceed/auto-deny) (default: park). Requires `--history` to persist against; with no history it falls back to `auto`
+--answer         Answer to a parked question when resuming. When omitted on a resume, the question itself is treated as the answer (default: "")
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -87,6 +90,15 @@ Atomic writes back this up: the history is written to a sibling temp file and re
 **Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).
 
 **Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand using the `readSkill` tool. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
+
+**Human-in-the-loop (`--humanInLoop`):** On a TTY, the `askUser` tool and permission `ask:` prompts always ask interactively — behavior is unchanged. Without a TTY (cron heartbeat, jobs, CI), the mode decides what happens:
+
+- `park` (default): the run **suspends** on the first `askUser` question or permission `ask:` prompt. The pending question — its text, the tool that asked, and (for permissions) the requested command/file — is recorded in the `--history` file under `pendingQuestion`, a single-line `AUX4_PENDING_QUESTION <json>` marker is written to stderr for a supervisor to parse, and the process exits with code `10`. Nothing is auto-proceeded and nothing is auto-denied.
+- `auto`: the legacy behavior — a no-TTY `askUser` returns "proceed with best judgment" and a no-TTY permission `ask:` is denied.
+
+Parking requires `--history` (there must be somewhere to record the question and resume from); with no history file the mode falls back to `auto`.
+
+**Resuming a parked question:** run `ask` again with the **same `--history`**. Provide the answer with `--answer "<text>"`, or simply pass it as the next `<question>` (when a pending question exists and no `--answer` is given, the question is treated as the answer). The answer is fed back to the waiting tool call — for `askUser` it becomes the tool result; for a permission it decides allow/deny, and on allow the original command runs — and the agent loop continues. If the agent parks again (a further question), the cycle repeats.
 
 #### Example
 
@@ -195,6 +207,28 @@ aux4 ai agent ask --config \
 ```
 
 The contents of `base-policy.md` are loaded as the immutable base layer, then `task.md` is layered on top.
+
+Human-in-the-loop, no TTY (park then resume):
+
+```bash
+# First run: the agent needs a decision but there is no TTY, so it parks and exits 10.
+aux4 ai agent ask --config --history session.json "Deploy the app to the right environment"
+```
+
+```text
+⏸ Paused: waiting for the user to answer a pending question. Run the agent again with the answer to continue.
+```
+
+A structured marker is emitted to stderr for a supervisor:
+
+```text
+AUX4_PENDING_QUESTION {"type":"pending_question","kind":"question","tool":"askUser","question":"Which environment — staging or production?","key":"ask:Which environment — staging or production?","timestamp":1720000000000}
+```
+
+```bash
+# Resume with the answer against the same history; the loop continues from where it parked.
+aux4 ai agent ask --config --history session.json --answer "staging" ""
+```
 
 With a named model from registry:
 

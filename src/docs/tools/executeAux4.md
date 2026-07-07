@@ -17,6 +17,16 @@ The tool runs `aux4 <your command>`. Do NOT add `aux4` yourself.
 **Correct:** `"pdf parse file.pdf"`, `"browser open --url https://example.com"`, `"config get key"`
 **Wrong:** `"aux4 pdf parse file.pdf"`, `"aux4 browser open"`, `"aux4 config get key"`
 
+The command runs a single aux4 command directly — it is **not** passed through a shell. Arguments are split on spaces with single/double quotes for grouping (use quotes when a value contains spaces), but there is **no** command substitution, variable expansion, globbing, piping, or redirection. This means you can safely pass arbitrary text — including backticks, `$( )`, `;`, `&&`, `|`, and quotes — inside a value such as `--content` and it is stored/used verbatim.
+
+**Passing content with special characters is safe:**
+```
+executeAux4({ command: 'kb add "pdf gotcha" --content "inspect fields with `aux4 pdf parse`, then fill with `aux4 pdf fill`"' })
+```
+The backtick text is stored literally, not executed. For large or multi-line content, prefer writing it to a file with `writeFile` and using `--file` (or pass it via the `stdin` parameter) instead of inlining it into `--content`.
+
+Because there is no shell, pipes and redirects do not work here. Use the `stdin` parameter for input, and read large output from the temp file path shown below.
+
 The only exception is `aux4` subcommands (package management, version, man pages) which live under the `aux4` namespace:
 - `"aux4 version"` — show aux4 version
 - `"aux4 pkger list"` — list installed packages

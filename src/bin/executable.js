@@ -103,6 +103,8 @@ function parsePolicyArg(value) {
         budget: JSON.parse(args[24] || "{}"),
         waitLock: args[25] || "",
         staleLock: args[26] || "",
+        humanInLoop: args[27] || "",
+        answer: args[28] || "",
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {

@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, maxIterations, budget, waitLock, staleLock) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, maxIterations, budget, waitLock, staleLock, humanInLoop, answer) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Ask your question",
@@ -259,6 +259,16 @@
               {
                 "name": "staleLock",
                 "text": "Age since last refresh past which a history lock is considered abandoned and stolen (e.g. 10m, 1h). Default 30m",
+                "default": ""
+              },
+              {
+                "name": "humanInLoop",
+                "text": "How to handle askUser / permission ask prompts when there is no TTY: park (suspend and wait for a human answer) or auto (legacy auto-proceed / auto-deny)",
+                "default": "park"
+              },
+              {
+                "name": "answer",
+                "text": "Answer to a parked question (resume). When omitted on resume, the question itself is treated as the answer",
                 "default": ""
               },
               {
