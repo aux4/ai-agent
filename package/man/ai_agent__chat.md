@@ -11,7 +11,7 @@ Each turn is a separate `ask` under the hood, so it takes the same per-history s
 #### Usage
 
 ```bash
-aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <text>
+aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--events <sink>] <text>
 ```
 
 --instructions   Prompt instructions file (default: AGENTS.md; falls back to AGENT.md then instructions.md if not found)
@@ -34,6 +34,7 @@ aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--his
 --useModel       Named model from registry to use for this request (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: skills)
+--events         Emit a structured JSON event stream (JSONL) to this sink, forwarded to each turn's ask. A file path writes JSONL to that file; `-` or `/dev/stderr` writes to stderr. Empty (default) disables it. See `aux4 aux4 man ai agent ask` for the event schema (default: "")
 text             Initial text to send (positional argument)
 
 #### Example

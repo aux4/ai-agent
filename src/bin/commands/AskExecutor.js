@@ -9,8 +9,14 @@ import { Policy } from "../../lib/Policy.js";
 import { BUDGET_EXIT_CODE } from "../../lib/LoopBudget.js";
 import { LockError, LOCK_EXIT_CODE, parseDuration } from "../../lib/HistoryLock.js";
 import { PENDING_EXIT_CODE } from "../../lib/HumanInLoop.js";
+import { createEventStream } from "../../lib/Events.js";
 
 export async function askExecutor(params) {
+  // Structured JSON event stream for a supervising process. Default OFF: an empty
+  // --events value yields a disabled (no-op) stream. Created before anything that can
+  // throw (e.g. the history lock) so run.start/run.end bracket the whole run.
+  const events = createEventStream(params.events, { runId: params.runId || undefined });
+  let runStatus = "ok";
   try {
     const baseInstructions = params.baseInstructions;
     const instructions = params.instructions;
@@ -128,8 +134,17 @@ export async function askExecutor(params) {
     }
     toolsConfig.humanInLoop = canPark ? humanInLoopMode : "auto";
 
-    const prompt = new Prompt(model, toolsConfig, { compaction, policy, budget, lock });
+    const prompt = new Prompt(model, toolsConfig, { compaction, policy, budget, lock, events });
     await prompt.init();
+
+    // Announce the run. Model id + a truncated goal give a supervisor enough context
+    // without leaking the full prompt into the event log.
+    events.emit("run.start", {
+      agent: (bio && bio.name) || "agent",
+      model: prompt.modelId,
+      apiType: prompt.apiType,
+      goal: typeof question === "string" ? question.slice(0, 200) : ""
+    });
 
     if (bio && typeof bio === "object" && Object.keys(bio).length > 0) {
       const bioParts = [];
@@ -193,6 +208,7 @@ export async function askExecutor(params) {
 
     if (prompt.paused) {
       process.exitCode = PENDING_EXIT_CODE;
+      runStatus = "parked";
     }
 
     prompt.close();
@@ -202,15 +218,25 @@ export async function askExecutor(params) {
     // non-zero exit so a supervisor can detect the truncation.
     if (prompt.budgetExceeded) {
       process.exitCode = BUDGET_EXIT_CODE;
+      runStatus = "budget-exceeded";
     }
+
+    // Final run event with the terminal status and total token usage. Statuses:
+    // ok | budget-exceeded | parked | lock-failed | error.
+    events.emit("run.end", { status: runStatus, tokens: prompt.tokenUsage });
+    events.close();
   } catch (error) {
     // Contention on the history lock is an expected, recoverable condition — not a
     // crash. Report it cleanly (no stack trace) and exit with the distinct lock code
     // so a supervisor can tell "history in use" apart from a real failure.
     if (error instanceof LockError) {
+      events.emit("run.end", { status: "lock-failed", error: error.message });
+      events.close();
       console.error(`Error: ${error.message}`);
       process.exit(LOCK_EXIT_CODE);
     }
+    events.emit("run.end", { status: "error", error: error.message });
+    events.close();
     if (error instanceof PromptError) {
       console.error("Prompt error:", error.message);
     } else {

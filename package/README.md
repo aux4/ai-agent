@@ -69,6 +69,7 @@ Key variables (from the package help):
 - skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
 - humanInLoop (default: "park") — how to handle a no-TTY `askUser` / permission `ask:`: `park` (suspend and record the question) or `auto` (legacy auto-proceed/auto-deny). See [Human-in-the-Loop](#human-in-the-loop).
 - answer (default: "") — answer to a parked question when resuming; when omitted on resume, the question is treated as the answer. See [Human-in-the-Loop](#human-in-the-loop).
+- events (default: "") — emit a structured JSON event stream (JSONL) to this sink for a supervising process; a file path writes JSONL, `-` or `/dev/stderr` writes to stderr, empty disables it. See [Event Stream](#event-stream-observability).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples:
@@ -126,6 +127,7 @@ Key variables:
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
 - skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
+- events (default: "") — emit a structured JSON event stream (JSONL) to this sink, forwarded to each turn's ask. See [Event Stream](#event-stream-observability).
 - text (arg: true) — text to send in this chat step
 
 Usage:
@@ -1154,6 +1156,82 @@ config:
   agent:
     waitLock: 30s     # default: "" (fail fast)
     staleLock: 30m    # default: 30m
+```
+
+---
+
+## Event Stream (Observability)
+
+A supervising process — a parent agent, a fleet conductor, an eval/trace consumer —
+often needs to observe a run **programmatically** rather than scraping the
+human-readable `[tool] ...` stderr logs. The `--events <sink>` flag turns on a
+structured event stream that writes **one JSON object per line** (JSONL).
+
+- **Default off.** With no `--events` value the stream is disabled — nothing is written
+  and there is zero overhead or behavior change.
+- **Sink.** A file path writes JSONL to that file (append mode). `-` or `/dev/stderr`
+  writes to stderr. Events go to their own sink and never pollute the normal stdout
+  answer or the `AUX4_PENDING_QUESTION` marker line.
+- **Correlation.** Every event carries a `run` id (from `--runId` when set, else
+  auto-generated) and a monotonic `seq` starting at 0, so a consumer can order and
+  group events without ambiguity.
+
+```bash
+aux4 ai agent ask --config --history session.json --events run.jsonl "Fix the failing build"
+```
+
+```text
+{"ts":1720000000000,"seq":0,"run":"run_9f1c2a","type":"run.start","agent":"agent","model":"gpt-4o","apiType":"chat","goal":"Fix the failing build"}
+{"ts":1720000000010,"seq":1,"run":"run_9f1c2a","type":"iteration.start","round":1}
+{"ts":1720000000010,"seq":2,"run":"run_9f1c2a","type":"model.request","round":1,"model":"gpt-4o"}
+{"ts":1720000000850,"seq":3,"run":"run_9f1c2a","type":"model.response","round":1,"model":"gpt-4o","tokensIn":1200,"tokensOut":80,"tokensCached":0,"toolCalls":["executeAux4"]}
+{"ts":1720000000851,"seq":4,"run":"run_9f1c2a","type":"tool.start","round":1,"tool":"executeAux4","toolCallId":"call_abc","args":"{\"command\":\"test run\"}"}
+{"ts":1720000002400,"seq":5,"run":"run_9f1c2a","type":"tool.end","round":1,"tool":"executeAux4","toolCallId":"call_abc","ok":true,"durationMs":1549}
+{"ts":1720000004100,"seq":8,"run":"run_9f1c2a","type":"run.end","status":"ok","tokens":{"input":2400,"output":160,"cached":0,"total":2560}}
+```
+
+### Common fields
+
+Every event line has these fields plus a type-specific payload:
+
+| Field | Description |
+|-------|-------------|
+| `ts` | Emission time in epoch milliseconds |
+| `seq` | Monotonic sequence number for this run, starting at 0 |
+| `run` | Run/session id correlating all events of one run |
+| `type` | Event type (see below) |
+
+### Event types
+
+| `type` | Payload | Emitted when |
+|--------|---------|--------------|
+| `run.start` | `agent`, `model`, `apiType`, `goal` (truncated question) | The run begins |
+| `run.end` | `status` (`ok` \| `budget-exceeded` \| `parked` \| `lock-failed` \| `error`), `tokens`, `error?` | The run finishes (all exit paths) |
+| `iteration.start` | `round` | A new tool-loop round begins |
+| `model.request` | `round`, `model` | Just before the model is invoked |
+| `model.response` | `round`, `model`, `tokensIn`, `tokensOut`, `tokensCached`, `toolCalls` | After the model responds |
+| `tool.start` | `round`, `tool`, `toolCallId`, `args` (truncated) | Before a tool is invoked |
+| `tool.end` | `round`, `tool`, `toolCallId`, `ok`, `durationMs`, `error?`, `parked?` | After a tool finishes / errors / parks |
+| `compaction` | `round`, `promptTokens`, `messagesBefore`, `messagesAfter` | History is auto-compacted |
+| `budget.exceeded` | `round`, `reason`, `iterations`, `tokens`, `elapsedMs`, `pendingTools` | The loop budget trips |
+| `question.parked` | `round`, `kind`, `tool`, `question`, `key` | A no-TTY question/permission parks |
+| `error` | `round`, `message` | The model/tool loop throws |
+
+### The JSONL contract
+
+A well-formed run is a valid JSONL file: `run.start` is first, `run.end` is last,
+`seq` is strictly increasing from 0, and every line shares one `run` id. The final
+`run.end` `status` lines up with the process exit code (`ok` = 0, `budget-exceeded` =
+7, `lock-failed` = 8, `parked` = 10). The Codex path emits events at run granularity
+(one `iteration.start`/`model.request`/`model.response` per run) because its tool loop
+runs inside the Codex API rather than the standard loop.
+
+Configured via `config.yaml`:
+
+```yaml
+config:
+  agent:
+    events: run.jsonl    # default: "" (disabled). Use "-" or "/dev/stderr" for stderr
 ```
 
 ---

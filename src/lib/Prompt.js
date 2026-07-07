@@ -21,6 +21,7 @@ import { loadCodexAuth } from "./TokenRefresh.js";
 import { LoopBudget } from "./LoopBudget.js";
 import { HistoryLock, writeFileAtomic } from "./HistoryLock.js";
 import { parseParkSignal, isParkSignal, emitPendingMarker, findParkedResult, applyPendingResolution } from "./HumanInLoop.js";
+import { EventStream } from "./Events.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -49,6 +50,12 @@ class Prompt {
     // run so concurrent asks/compaction on the same file can never clobber it.
     this.lockConfig = options.lock || null;
     this.historyLock = null;
+    // Structured JSON event stream. Always present (a disabled stream when no sink is
+    // configured) so every emit site is a cheap no-op unless the supervisor opted in.
+    this.events = options.events || new EventStream(null);
+    // Loop round counter (one model request/response per round). Distinct from
+    // budget.iterations, which only counts rounds that actually run tools.
+    this.round = 0;
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
@@ -59,6 +66,8 @@ class Prompt {
     this.paused = false;
     this.mcpClient = null;
     this.apiType = config.api || "chat";
+    // Best-effort model identifier for observability events.
+    this.modelId = (config.config && config.config.model) || config.type || "openai";
 
     if (this.apiType === "codex") {
       const codexAuth = loadCodexAuth();
@@ -255,6 +264,7 @@ class Prompt {
     // Fresh loop budget for this ask (counters + wall-clock start).
     this.budget.reset();
     this.budgetExceeded = null;
+    this.round = 0;
 
     const answer = await this.execute();
 
@@ -292,8 +302,16 @@ class Prompt {
 
     let chain = promptTemplate.pipe(this.model);
 
+    // One loop round = one model request/response (and, if tools are requested, the
+    // round of tool executions that follows).
+    const round = ++this.round;
+    this.events.emit("iteration.start", { round });
+
     try {
       let response;
+
+      this.events.emit("model.request", { round, model: this.modelId });
+      const usageBefore = { ...this.tokenUsage };
 
       if (this.streaming && !this.outputSchema) {
         response = await this._streamResponse(chain);
@@ -301,9 +319,19 @@ class Prompt {
         response = await chain.invoke();
       }
 
-      const tokensBefore = this.tokenUsage.total;
+      const tokensBefore = usageBefore.total;
       this._accumulateTokenUsage(response);
       this.budget.addConsumed(this.tokenUsage.total - tokensBefore);
+
+      const hasToolCalls = !!(response.tool_calls && response.tool_calls.length > 0);
+      this.events.emit("model.response", {
+        round,
+        model: this.modelId,
+        tokensIn: this.tokenUsage.input - usageBefore.input,
+        tokensOut: this.tokenUsage.output - usageBefore.output,
+        tokensCached: this.tokenUsage.cached - usageBefore.cached,
+        toolCalls: hasToolCalls ? response.tool_calls.map(tc => tc.name) : []
+      });
 
       if (response.tool_calls && response.tool_calls.length > 0) {
         // Enforce the loop budget BEFORE running this round of tools. If a limit is
@@ -329,10 +357,24 @@ class Prompt {
             const argsPreview = typeof toolCall.args === "object" ? JSON.stringify(toolCall.args).slice(0, 200) : "";
             console.error(`[tool] ${toolCall.name}(${argsPreview})`);
             const startTime = Date.now();
+            this.events.emit("tool.start", {
+              round,
+              tool: toolCall.name,
+              toolCallId: toolCall.id,
+              args: argsPreview
+            });
             try {
               const tool = this.tools[toolCall.name];
               if (!tool) {
                 console.error(`[tool] ${toolCall.name} => unknown tool`);
+                this.events.emit("tool.end", {
+                  round,
+                  tool: toolCall.name,
+                  toolCallId: toolCall.id,
+                  ok: false,
+                  durationMs: Date.now() - startTime,
+                  error: "unknown tool"
+                });
                 return {
                   role: "tool",
                   content: `Error: Unknown tool "${toolCall.name}". Available tools: ${Object.keys(this.tools).join(", ")}`,
@@ -361,6 +403,14 @@ class Prompt {
               if (parkRecord) {
                 parkRecord.toolCallId = toolCall.id;
                 console.error(`[tool] ${toolCall.name} => parked (awaiting user response)`);
+                this.events.emit("tool.end", {
+                  round,
+                  tool: toolCall.name,
+                  toolCallId: toolCall.id,
+                  ok: true,
+                  durationMs: Date.now() - startTime,
+                  parked: true
+                });
                 return {
                   role: "tool",
                   content: `[Paused — awaiting the user's answer to: ${parkRecord.question}]`,
@@ -373,6 +423,13 @@ class Prompt {
 
               const preview = typeof toolResponse === "string" ? toolResponse.slice(0, 100) : "";
               console.error(`[tool] ${toolCall.name} => done (${elapsed}s) ${preview}`);
+              this.events.emit("tool.end", {
+                round,
+                tool: toolCall.name,
+                toolCallId: toolCall.id,
+                ok: true,
+                durationMs: Date.now() - startTime
+              });
               const entry = {
                 role: "tool",
                 content: toolResponse,
@@ -390,6 +447,14 @@ class Prompt {
             } catch (error) {
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
               console.error(`[tool] ${toolCall.name} => error (${elapsed}s): ${error.message}`);
+              this.events.emit("tool.end", {
+                round,
+                tool: toolCall.name,
+                toolCallId: toolCall.id,
+                ok: false,
+                durationMs: Date.now() - startTime,
+                error: error.message
+              });
               return {
                 role: "tool",
                 content: `Error executing tool "${toolCall.name}": ${error.message}`,
@@ -412,6 +477,13 @@ class Prompt {
           this.paused = true;
           this.saveHistory(true);
           emitPendingMarker(this.pendingQuestion);
+          this.events.emit("question.parked", {
+            round,
+            kind: this.pendingQuestion.kind,
+            tool: this.pendingQuestion.tool,
+            question: this.pendingQuestion.question,
+            key: this.pendingQuestion.key
+          });
           return "⏸ Paused: waiting for the user to answer a pending question. Run the agent again with the answer to continue.";
         }
 
@@ -447,12 +519,19 @@ class Prompt {
           || response.usage_metadata?.input_tokens || 0;
         if (shouldCompact(promptTokens, this.compactionConfig)) {
           const compactionModel = this.compactionConfig.model || this.config;
+          const messagesBefore = this.messages.length;
           try {
             this.messages = await compactMessages(this.messages, compactionModel, {
               keepLastMessages: this.compactionConfig.keepLastMessages || 6,
               promptFile: this.compactionConfig.promptFile
             });
             this.compacted = true;
+            this.events.emit("compaction", {
+              round,
+              promptTokens,
+              messagesBefore,
+              messagesAfter: this.messages.length
+            });
           } catch (err) {
             console.error(`[compact] Warning: ${err.message}`);
           }
@@ -463,6 +542,7 @@ class Prompt {
 
       return answer;
     } catch (e) {
+      this.events.emit("error", { round, message: e.message });
       this.saveHistory(true);
       throw new PromptError(e.message, e);
     }
@@ -492,6 +572,14 @@ class Prompt {
       elapsedMs: this.budget.elapsed()
     };
     console.error(`[budget] ${reason} — stopping loop after ${Math.max(0, this.budget.iterations - 1)} completed iteration(s)`);
+    this.events.emit("budget.exceeded", {
+      round: this.round,
+      reason,
+      iterations: this.budget.iterations,
+      tokens: this.budget.consumed,
+      elapsedMs: this.budget.elapsed(),
+      pendingTools: pendingTools ? pendingTools.split(", ") : []
+    });
 
     this.messages.push({ role: "assistant", content: note, timestamp: Date.now() });
     this.saveHistory(true);
@@ -521,7 +609,12 @@ class Prompt {
   }
 
   async _executeCodex() {
+    // The Codex loop lives inside CodexApi.execute (its own internal tool loop), so
+    // events here are emitted at run granularity rather than per internal round.
+    const round = ++this.round;
+    this.events.emit("iteration.start", { round });
     try {
+      this.events.emit("model.request", { round, model: this.modelId });
       const result = await this.codexApi.execute(this.messages, {
         streaming: this.streaming && !this.outputSchema,
         tokenCallback: this.tokenCallback,
@@ -534,6 +627,14 @@ class Prompt {
       this.tokenUsage.cached += result.usage.cached || 0;
       this.tokenUsage.total += (result.usage.input || 0) + (result.usage.output || 0);
 
+      this.events.emit("model.response", {
+        round,
+        model: this.modelId,
+        tokensIn: result.usage.input || 0,
+        tokensOut: result.usage.output || 0,
+        tokensCached: result.usage.cached || 0
+      });
+
       // The Codex loop lives inside CodexApi.execute; when it trips the budget it
       // returns a budget-exceeded marker answer instead of recursing. Persist token
       // usage (already accumulated above) + the note and surface the reason without
@@ -541,6 +642,13 @@ class Prompt {
       if (result.budgetExceeded) {
         this.budgetExceeded = result.budgetExceeded;
         console.error(`[budget] ${result.budgetExceeded.reason} — stopping Codex loop after ${Math.max(0, (result.budgetExceeded.iterations || this.budget.iterations) - 1)} completed iteration(s)`);
+        this.events.emit("budget.exceeded", {
+          round,
+          reason: result.budgetExceeded.reason,
+          iterations: result.budgetExceeded.iterations || this.budget.iterations,
+          tokens: result.budgetExceeded.tokens || this.budget.consumed,
+          elapsedMs: result.budgetExceeded.elapsedMs || this.budget.elapsed()
+        });
         this.messages.push({ role: "assistant", content: result.answer, timestamp: Date.now() });
         this.saveHistory(true);
         return result.answer;
@@ -581,6 +689,7 @@ class Prompt {
       this.saveHistory(true);
       return answer;
     } catch (e) {
+      this.events.emit("error", { round, message: e.message });
       this.saveHistory(true);
       throw new PromptError(e.message, e);
     }

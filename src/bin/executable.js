@@ -105,6 +105,7 @@ function parsePolicyArg(value) {
         staleLock: args[26] || "",
         humanInLoop: args[27] || "",
         answer: args[28] || "",
+        events: args[29] || "",
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {

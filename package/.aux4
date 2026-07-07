@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, maxIterations, budget, waitLock, staleLock, humanInLoop, answer) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, maxIterations, budget, waitLock, staleLock, humanInLoop, answer, events) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Ask your question",
@@ -272,6 +272,11 @@
                 "default": ""
               },
               {
+                "name": "events",
+                "text": "Emit a structured JSON event stream (JSONL) to this sink for a supervising process. A file path writes JSONL to that file; '-' or '/dev/stderr' writes to stderr. Empty (default) disables it",
+                "default": ""
+              },
+              {
                 "name": "question",
                 "text": "The question to ask",
                 "arg": true
@@ -337,8 +342,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, maxIterations, budget, waitLock, staleLock)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references, skills, maxIterations, budget, waitLock, staleLock)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, maxIterations, budget, waitLock, staleLock, events)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references, skills, maxIterations, budget, waitLock, staleLock, events)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -446,6 +451,11 @@
               {
                 "name": "staleLock",
                 "text": "Age since last refresh past which a history lock is considered abandoned and stolen (e.g. 10m, 1h). Default 30m",
+                "default": ""
+              },
+              {
+                "name": "events",
+                "text": "Emit a structured JSON event stream (JSONL) to this sink for a supervising process. A file path writes JSONL to that file; '-' or '/dev/stderr' writes to stderr. Empty (default) disables it",
                 "default": ""
               },
               {

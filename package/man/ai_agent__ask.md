@@ -19,13 +19,14 @@ Key features:
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Loop budget** — a safety cap on the tool-execution loop: an always-on iteration cap (`--maxIterations`, default 50) plus optional token/time caps (`--budget`). When a limit trips the loop stops cleanly, appends a `[budget-exceeded]` note, persists history, and exits with code 7
 - **History session locking** — when `--history <file>` is used, the run takes a real advisory lock (`<file>.lock`) held for its entire duration, so concurrent runs (a heartbeat firing during a long ask, two parallel agents) can never clobber or drop turns. On contention the default is to fail fast with a clear error and exit code 8; `--waitLock <duration>` opts into poll-waiting. History is written atomically (temp file + rename)
+- **Structured event stream** — emit a machine-readable JSONL trace of the run to a sink with `--events <sink>` (default off) so a supervising process can observe tool calls, token usage, budget/park/error events, and the final status programmatically instead of scraping stderr (see below)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--humanInLoop <park|auto>] [--answer <text>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--waitLock <duration>] [--staleLock <duration>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--maxIterations <n>] [--budget <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--humanInLoop <park|auto>] [--answer <text>] [--events <sink>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -54,6 +55,7 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --skills         Path to the skills directory (default: skills)
 --humanInLoop    How to handle a no-TTY askUser / permission ask: `park` (suspend and record the question) or `auto` (legacy auto-proceed/auto-deny) (default: park). Requires `--history` to persist against; with no history it falls back to `auto`
 --answer         Answer to a parked question when resuming. When omitted on a resume, the question itself is treated as the answer (default: "")
+--events         Emit a structured JSON event stream (JSONL) to this sink. A file path writes JSONL to that file; `-` or `/dev/stderr` writes to stderr. Empty (default) disables it — zero output, no behavior change (default: "")
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -99,6 +101,39 @@ Atomic writes back this up: the history is written to a sibling temp file and re
 Parking requires `--history` (there must be somewhere to record the question and resume from); with no history file the mode falls back to `auto`.
 
 **Resuming a parked question:** run `ask` again with the **same `--history`**. Provide the answer with `--answer "<text>"`, or simply pass it as the next `<question>` (when a pending question exists and no `--answer` is given, the question is treated as the answer). The answer is fed back to the waiting tool call — for `askUser` it becomes the tool result; for a permission it decides allow/deny, and on allow the original command runs — and the agent loop continues. If the agent parks again (a further question), the cycle repeats.
+
+**Structured event stream (`--events`):** A supervising process (a parent agent, the Conductor, an eval/trace consumer) often needs to observe a run **programmatically** rather than scraping the human-readable `[tool] ...` stderr logs. `--events <sink>` turns on a structured event stream that writes **one JSON object per line** (JSONL).
+
+- **Default off.** With no `--events` value the stream is disabled — nothing is written and there is zero overhead or behavior change.
+- **Sink.** A file path writes JSONL to that file (append mode). `-` or `/dev/stderr` writes to stderr. Events go to their own sink and never touch the normal stdout answer or the `AUX4_PENDING_QUESTION` marker line.
+- **Config key.** Because `--events` is an ordinary command variable, it can also be set from a config file under an `events:` key and selected with `--config`.
+
+Every event line is a JSON object with these common fields, plus type-specific payload:
+
+| Field | Description |
+|-------|-------------|
+| `ts` | Emission time in epoch milliseconds |
+| `seq` | Monotonic sequence number for this run, starting at 0 |
+| `run` | Run/session id correlating all events of one run (from `--runId` when set, else auto-generated) |
+| `type` | Event type (see below) |
+
+Event types and their notable payload fields:
+
+| `type` | Payload | Emitted when |
+|--------|---------|--------------|
+| `run.start` | `agent`, `model`, `apiType`, `goal` (truncated question) | The run begins |
+| `run.end` | `status` (`ok` \| `budget-exceeded` \| `parked` \| `lock-failed` \| `error`), `tokens` (input/output/cached/total), `error?` | The run finishes (all exit paths) |
+| `iteration.start` | `round` | A new tool-loop round (one model request/response) begins |
+| `model.request` | `round`, `model` | Just before the model is invoked |
+| `model.response` | `round`, `model`, `tokensIn`, `tokensOut`, `tokensCached`, `toolCalls` (names) | After the model responds |
+| `tool.start` | `round`, `tool`, `toolCallId`, `args` (truncated summary) | Before a tool is invoked |
+| `tool.end` | `round`, `tool`, `toolCallId`, `ok`, `durationMs`, `error?`, `parked?` | After a tool finishes (or errors, or parks) |
+| `compaction` | `round`, `promptTokens`, `messagesBefore`, `messagesAfter` | Conversation history is auto-compacted |
+| `budget.exceeded` | `round`, `reason`, `iterations`, `tokens`, `elapsedMs`, `pendingTools` | The loop budget trips |
+| `question.parked` | `round`, `kind`, `tool`, `question`, `key` | A no-TTY question/permission is parked |
+| `error` | `round`, `message` | The model/tool loop throws |
+
+A well-formed run is a valid JSONL file: `run.start` first, `run.end` last, `seq` strictly increasing from 0, and a single shared `run` id. The final `run.end` `status` reflects the terminal outcome and lines up with the exit code (`ok` = 0, `budget-exceeded` = 7, `lock-failed` = 8, `parked` = 10). The Codex path emits events at run granularity (one `iteration.start`/`model.request`/`model.response` per run) since its tool loop runs inside the Codex API rather than the standard loop.
 
 #### Example
 
@@ -240,4 +275,26 @@ With Codex (ChatGPT subscription, no API key needed):
 
 ```bash
 aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "What time is it?"
+```
+
+With a structured event stream to a JSONL file for a supervisor:
+
+```bash
+aux4 ai agent ask --config --history session.json --events run.jsonl "Investigate the failing build and fix it"
+```
+
+```text
+{"ts":1720000000000,"seq":0,"run":"run_9f1c2a","type":"run.start","agent":"agent","model":"gpt-4o","apiType":"chat","goal":"Investigate the failing build and fix it"}
+{"ts":1720000000010,"seq":1,"run":"run_9f1c2a","type":"iteration.start","round":1}
+{"ts":1720000000010,"seq":2,"run":"run_9f1c2a","type":"model.request","round":1,"model":"gpt-4o"}
+{"ts":1720000000850,"seq":3,"run":"run_9f1c2a","type":"model.response","round":1,"model":"gpt-4o","tokensIn":1200,"tokensOut":80,"tokensCached":0,"toolCalls":["executeAux4"]}
+{"ts":1720000000851,"seq":4,"run":"run_9f1c2a","type":"tool.start","round":1,"tool":"executeAux4","toolCallId":"call_abc","args":"{\"command\":\"test run\"}"}
+{"ts":1720000002400,"seq":5,"run":"run_9f1c2a","type":"tool.end","round":1,"tool":"executeAux4","toolCallId":"call_abc","ok":true,"durationMs":1549}
+{"ts":1720000004100,"seq":8,"run":"run_9f1c2a","type":"run.end","status":"ok","tokens":{"input":2400,"output":160,"cached":0,"total":2560}}
+```
+
+Stream events to stderr instead of a file (`-`):
+
+```bash
+aux4 ai agent ask --config --events - "Summarize the repo" 2>events.log >answer.txt
 ```
