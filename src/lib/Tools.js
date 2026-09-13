@@ -27,6 +27,7 @@ import readSkillDesc from "../docs/tools/readSkill.md?raw";
 import searchTextDesc from "../docs/tools/searchText.md?raw";
 import aux4SkillDesc from "../docs/tools/aux4Skill.md?raw";
 import { listSkills, listInstalledSkills } from "./Skills.js";
+import { extractChildTimings } from "./Timing.js";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
@@ -397,7 +398,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
       closeFds();
 
       if (code !== 0) {
-        const stderr = readOutputFile(stderrPath, MAX_OUTPUT_LENGTH);
+        const stderr = extractChildTimings(readOutputFile(stderrPath, MAX_OUTPUT_LENGTH));
         const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
         cleanupTempFiles(stdoutPath, stderrPath);
         const output = stderr || stdout || `Process exited with code ${code}`;
@@ -407,6 +408,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
       }
 
       const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
+      extractChildTimings(readOutputFile(stderrPath, MAX_OUTPUT_LENGTH));
       const fullSize = getFileSize(stdoutPath);
 
       if (fullSize > MAX_OUTPUT_LENGTH) {

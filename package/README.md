@@ -1383,6 +1383,14 @@ Returns structured JSON:
 
 This pattern is used in the context tests where several context files are learned first and then the agent is queried.
 
+## Runtime timing
+
+Hosted executions set `AUX4_TRACE_ID` and `AUX4_EXECUTION_PHASE` automatically. The agent
+then writes compact `aux4.timing` JSON records to stderr for bootstrap, package discovery,
+model inference, result loading, and tool command execution. These records contain only a
+non-secret correlation ID, fixed span names, duration, phase, and status. Prompt text, model
+output, command arguments, URLs, and credentials are never included.
+
 ---
 
 ## License

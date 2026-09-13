@@ -1,6 +1,7 @@
 import { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { buildAgentPrompt } from "./AskExecutor.js";
+import { timed } from "../../lib/Timing.js";
 
 // PLAN: load conversation state from --history (+ an optional new user
 // --question), run EXACTLY ONE LLM turn, and emit a structured JSON result to
@@ -11,8 +12,8 @@ import { buildAgentPrompt } from "./AskExecutor.js";
 //   {"status":"tool_calls","toolCalls":[{"id":"...","name":"...","arguments":{...}}]}
 export async function planExecutor(params) {
   try {
-    const { prompt, message, role } = await buildAgentPrompt(params);
-    const result = await prompt.plan(message, params, role);
+    const { prompt, message, role } = await timed("agent.bootstrap", () => buildAgentPrompt(params));
+    const result = await timed("agent.plan", () => prompt.plan(message, params, role));
     console.log(JSON.stringify(result));
     prompt.close();
   } catch (error) {
@@ -28,11 +29,11 @@ export async function planExecutor(params) {
 // injecting tool results — the same single-turn primitive.
 export async function resumeExecutor(params) {
   try {
-    const toolResults = await loadToolResults(params.toolResults);
+    const toolResults = await timed("agent.results-load", () => loadToolResults(params.toolResults));
 
-    const { prompt, message, role } = await buildAgentPrompt(params);
+    const { prompt, message, role } = await timed("agent.bootstrap", () => buildAgentPrompt(params));
     prompt.injectToolResults(toolResults);
-    const result = await prompt.plan(message, params, role);
+    const result = await timed("agent.plan", () => prompt.plan(message, params, role));
     console.log(JSON.stringify(result));
     prompt.close();
   } catch (error) {

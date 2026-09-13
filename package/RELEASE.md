@@ -1,5 +1,14 @@
 # Release notes
 
+## 1.3.3
+
+- Added opt-in, stderr-only runtime timing records for agent bootstrap, package/tool
+  discovery, model inference, result loading, and command execution. Hosted executions
+  propagate a non-secret trace correlation header only to internal aux4.cloud model
+  endpoints; prompts, outputs, command arguments, URLs, and credentials are never logged.
+- Valid timing records emitted by nested aux4 cloud commands are normalized and relayed to
+  the parent execution log, while ordinary child stderr keeps its existing behavior.
+
 ## 1.3.2
 
 - History checkpoints now create their parent directory before the synchronous

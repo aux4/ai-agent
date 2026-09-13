@@ -16,6 +16,7 @@ import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
 import { GeminiCliApi } from "./GeminiCliApi.js";
 import { loadGeminiAuth } from "./GeminiAuth.js";
+import { internalTraceHeaders, timed } from "./Timing.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -77,6 +78,18 @@ class Prompt {
         };
       }
 
+      const baseURL = chatConfig.configuration?.baseURL;
+      const traceHeaders = internalTraceHeaders(baseURL);
+      if (Object.keys(traceHeaders).length > 0) {
+        chatConfig.configuration = {
+          ...(chatConfig.configuration || {}),
+          defaultHeaders: {
+            ...(chatConfig.configuration?.defaultHeaders || {}),
+            ...traceHeaders
+          }
+        };
+      }
+
       this.model = new Model(chatConfig);
     }
   }
@@ -94,7 +107,9 @@ class Prompt {
     }
 
     // Create tools with configuration if provided
-    const configuredTools = Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools;
+    const configuredTools = await timed("package.discovery", async () =>
+      Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools
+    );
 
     const mcpConfigPath = path.join(process.cwd(), "mcp.json");
     let mcpTools = [];
@@ -401,9 +416,9 @@ class Prompt {
       let response;
 
       if (this.streaming && !this.outputSchema) {
-        response = await this._streamResponse(chain);
+        response = await timed("model.inference", () => this._streamResponse(chain));
       } else {
-        response = await chain.invoke();
+        response = await timed("model.inference", () => chain.invoke());
       }
 
       this._accumulateTokenUsage(response);
