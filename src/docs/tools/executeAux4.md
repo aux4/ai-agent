@@ -1,60 +1,44 @@
 # Execute Aux4 CLI Tool
 
-Run any aux4 command. The `aux4` prefix is added automatically — just provide the command name and arguments.
+Runs a single **aux4** command — exactly as you would type it in a terminal, including the leading `aux4`.
+
+## How aux4 commands read
+
+`aux4 <X>` means **"auxiliary for X"**:
+
+- `aux4 git status` — auxiliary for git
+- `aux4 google gmail list --query is:unread` — auxiliary for google
+- `aux4 aux4 pkger list --filter gmail` — auxiliary for **aux4 itself** (package management, man pages, version). The repeated `aux4` is correct, not a typo.
+
+Write the whole command, every time. Never strip the leading `aux4`.
+
+```
+executeAux4("aux4 aux4 pkger man aux4/aux4")
+executeAux4("aux4 google gmail list --query is:unread")
+```
+
+## Discovering commands
+
+Commands are grouped into profiles, so explore top-down:
+
+1. `aux4 aux4 pkger list --filter <keyword>` — find the package that covers a capability
+2. `aux4 --help` — list the top-level commands
+3. `aux4 <command> --help` — a profile's subcommands, or a leaf command's flags
+4. `aux4 <command> --whereIsIt` — which package a command comes from
+
+## Limits
+
+This tool runs **only aux4 commands** — one per call. It is not a shell: other programs,
+pipes, redirects, and command chaining (`;` `&&` `||` `|` `` ` `` `$()` `>`) are rejected.
+To post-process output, use the aux4 command's own flags, or read the result and reason
+about it yourself.
+
+For large-output handling, timeouts, stdin, and config, call `readReference("executeAux4.md")`.
 
 ## Parameters
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
-| `command` | string | Yes      | The command to execute (without `aux4` prefix) |
+| `command` | string | Yes      | The full aux4 command, e.g. `aux4 config get key` |
 | `stdin`   | string | No       | Data to pass as stdin |
-| `timeout` | number | No       | Timeout in seconds (default: 60, 0 = no timeout) |
-
-## Command Format
-
-The tool runs `aux4 <your command>`. Do NOT add `aux4` yourself.
-
-**Correct:** `"pdf parse file.pdf"`, `"browser open --url https://example.com"`, `"config get key"`
-**Wrong:** `"aux4 pdf parse file.pdf"`, `"aux4 browser open"`, `"aux4 config get key"`
-
-The only exception is `aux4` subcommands (package management, version, man pages) which live under the `aux4` namespace:
-- `"aux4 version"` — show aux4 version
-- `"aux4 pkger list"` — list installed packages
-- `"aux4 man command"` — show command manual
-
-These require `aux4` because `aux4` is the command name, making the full invocation `aux4 aux4 version`.
-
-## Discovery
-
-Use `--help` to explore any command:
-- `"--help"` — list all top-level commands
-- `"pdf --help"` — show help for pdf
-- `"browser open --help"` — show help for browser open
-
-## Large Output
-
-When a command produces output larger than 10KB, the result is truncated and you'll see:
-`[Output truncated: X bytes total. Full output was written to /tmp/path/to/file]`
-
-**When this happens, use `readFile` to read the full output from the temp file path.** Do not work with truncated data — always read the full file.
-
-## Timeout Behavior
-
-Commands that exceed the timeout are automatically transferred to a background job (if aux4/jobs is installed). Use `"jobs status"`, `"jobs output <id>"` to check.
-
-For long-running commands (builds, API calls), increase the timeout or set `timeout: 0`.
-
-## Passing stdin
-
-Use the `stdin` parameter for commands that read from stdin:
-```
-executeAux4({ command: 'pdf fill "form.pdf" --out "filled.pdf"', stdin: '{"field": "value"}' })
-```
-
-## Configuration
-
-aux4 supports loading parameters from `config.yaml`:
-```
-"deploy --config dev"
-"deploy --configFile custom.yaml --config staging"
-```
+| `timeout` | number | No       | Timeout in seconds (default 60, 0 = no timeout) |

@@ -5,9 +5,17 @@ Generate images from a text prompt using a configured image model. Supports sing
 Key features:
 
 - **Single or batch generation** — set `--quantity` to generate multiple images at once
-- **Configurable model** — use `--model` JSON to pick the image backend (DALL-E 3, gpt-image-1, etc.)
+- **Configurable model** — use `--model` JSON to pick the image backend: OpenAI (DALL-E 3, gpt-image-1), xAI (grok-2-image), or Google Gemini (Nano Banana / Imagen)
 - **Quality control** — choose between standard/hd (DALL-E) or low/medium/high/auto (gpt-image)
 - **Custom resolution** — set image dimensions with `--size`
+
+Supported providers (via `--model` `type`):
+
+| `type`   | Example models                                  | API key |
+| -------- | ----------------------------------------------- | ------- |
+| `openai` | `gpt-image-1` (default), `gpt-image-1-mini`, `dall-e-3`, `dall-e-2` | `OPENAI_API_KEY` |
+| `xai`    | `grok-2-image-latest`                           | `XAI_API_KEY` |
+| `gemini` | `gemini-2.5-flash-image` (Nano Banana), `imagen-4.0-generate-001` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) |
 
 #### Usage
 
@@ -50,4 +58,15 @@ Generating image 3/3...
 Image saved to 1-shapes.png
 Image saved to 2-shapes.png
 Image saved to 3-shapes.png
+```
+
+Generate an image with Google Gemini (Nano Banana) using an API key:
+
+```bash
+aux4 ai agent image --prompt "a watercolor fox in a misty forest" --image fox.png --model '{"type":"gemini","config":{"model":"gemini-2.5-flash-image"}}'
+```
+
+```text
+Generating image...
+Image saved to fox.png
 ```

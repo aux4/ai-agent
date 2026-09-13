@@ -7,6 +7,8 @@ Lightweight AI agent runtime for aux4 with RAG, tool usage, image generation, an
 - Generate images from text prompts
 - Let the agent call local aux4 commands as tools during conversations
 - Inspect conversation history and run interactive chat loops
+- Decompose durable runs with `plan`, `run-tool`, and `resume`; every step uses
+  the same tool registry and permission behavior as `ask`
 
 ## Installation
 
@@ -165,6 +167,65 @@ aux4 ai agent history history.json --costIn 3.0 --costOut 15.0 --costCache 0.30
 ```
 
 For more details see [aux4 ai agent history](./commands/ai/agent/history).
+
+---
+
+## Plan & Resume (Async / Resumable Agents)
+
+`ask` and `chat` run a **synchronous** loop: the agent calls the model, executes any tools it wants in-process, and recurses until it has a final answer. `plan` and `resume` split that loop into its two halves — **decide** and **act** — so an external orchestrator can run the tools between turns and resume the agent later, even in a fresh process loaded from the `--history` checkpoint. This is the primitive behind running agents on serverless orchestrators (for example a Step Functions state machine) where suspended states cost nothing and tools run as separate steps.
+
+Both commands run **exactly one** LLM turn and emit a structured JSON result to stdout:
+
+- `{"status":"final","text":"..."}` — the model returned a final answer.
+- `{"status":"tool_calls","toolCalls":[{"id":"...","name":"...","arguments":{...}}]}` — the model wants tools run.
+
+They reuse all of `ask`'s setup — model/provider resolution (including AWS Bedrock/Mantle), tool-schema building, instructions, bio, skills, permissions, and `--history` load/save — so a turn behaves exactly like one turn of `ask`, minus tool execution and recursion.
+
+### aux4 ai agent plan
+
+Loads conversation state from `--history` (plus an optional new user message), runs one turn, and returns the structured result. In the `tool_calls` case it **checkpoints the assistant tool-call message into `--history` and stops** — it does not execute the tools and does not recurse.
+
+```bash
+aux4 ai agent plan --configFile config.yaml --config agent \
+  --instructions AGENTS.md --history history.json \
+  --tools currentDateTime "What is today's date? Use the currentDateTime tool."
+```
+
+```text
+{"status":"tool_calls","toolCalls":[{"id":"61086967-58e5-48c1-b7cc-575d67362f14","name":"currentDateTime","arguments":{}}]}
+```
+
+The `history.json` now holds the user message and the assistant tool-call message, but **no** tool result — the tool was not run.
+
+### aux4 ai agent resume
+
+Injects externally-produced tool results into history as correctly-paired tool messages (matched by `tool_call` id), then runs the next turn. Tool results are supplied with `--toolResults`, as a JSON file path or an inline JSON array of `{"id":"<toolCallId>","content":"<result>"}`.
+
+```bash
+aux4 ai agent resume --configFile config.yaml --config agent \
+  --instructions AGENTS.md --history history.json --tools currentDateTime \
+  --toolResults '[{"id":"61086967-58e5-48c1-b7cc-575d67362f14","content":"UTC: 2099-01-01T12:00:00.000Z"}]'
+```
+
+```text
+{"status":"final","text":"2099-01-01"}
+```
+
+The answer is drawn from the injected result — the agent used the externally-supplied value rather than executing the tool itself.
+
+### The orchestration loop
+
+An orchestrator drives the agent by alternating the two commands until `status` is `final`:
+
+```text
+plan  -> {status: tool_calls, toolCalls}    # decide
+  (run the toolCalls externally)            # act
+resume --toolResults <results>              # feed results back, decide again
+  -> {status: tool_calls}  -> act -> resume -> ...
+  -> {status: final, text}                  # done
+```
+
+For more details see [aux4 ai agent plan](./commands/ai/agent/plan) and [aux4 ai agent resume](./commands/ai/agent/resume).
 
 ---
 
@@ -454,7 +515,7 @@ Key variables:
 - size (default: 1024x1024) — resolution (examples: 1024x1024, 1792x1024).
 - quality (default: auto) — quality parameter and accepts options like standard, hd, low, medium, high, auto (implementation dependent on selected image backend).
 - context (default: false) — read extra context from stdin.
-- model (default: "{}") — model configuration JSON (for example: {"type":"openai","config":{"model":"dall-e-3"}}).
+- model (default: "{}") — model configuration JSON (for example: {"type":"openai","config":{"model":"dall-e-3"}}). Supported `type` values: `openai` (DALL-E, gpt-image — `OPENAI_API_KEY`), `xai` (grok-2-image — `XAI_API_KEY`), and `gemini` (Nano Banana / Imagen — `GEMINI_API_KEY` or `GOOGLE_API_KEY`).
 - quantity (default: "1") — number of images to generate; if >1, outputs are numbered files.
 
 Examples:
@@ -484,6 +545,16 @@ Image saved to 1-multi-test.png
 Image saved to 2-multi-test.png
 Image saved to 3-multi-test.png
 
+3) Google Gemini (Nano Banana) via API key:
+
+```bash
+aux4 ai agent image --prompt "a watercolor fox in a misty forest" --image fox.png --model '{"type":"gemini","config":{"model":"gemini-2.5-flash-image"}}'
+```
+
+Output:
+Generating image...
+Image saved to fox.png
+
 Using images as input to ask:
 After generating or saving an image, pass the filename to the ask command with the --image parameter:
 
@@ -500,6 +571,66 @@ Notes:
 For more details see [aux4 ai agent image](./commands/ai/agent/image).
 
 ---
+
+## AWS Bedrock
+
+Two ways in, and they cover different model sets.
+
+### Bedrock Converse (`type: bedrock`)
+
+For models in the Bedrock foundation-model catalogue — Anthropic, Llama, Mistral, Nova, and the
+`google.gemma-3-*` family. List what your account can reach with
+`aws bedrock list-foundation-models`:
+
+```yaml
+config:
+  model:
+    type: bedrock
+    config:
+      model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+      region: us-east-1
+```
+
+### Mantle, the OpenAI-compatible endpoint
+
+Some models are served only through Bedrock's OpenAI-compatible endpoint and **do not appear in
+`list-foundation-models`** — `google.gemma-4-26b-a4b` is one. Looking for them in the catalogue
+and concluding they are unavailable is the easy mistake; they are reachable at
+`https://bedrock-mantle.<region>.api.aws/openai/v1`.
+
+Use `type: openai` pointed at that base URL, and let `awsSigv4` sign the requests with your normal
+AWS credential chain — no API key is minted or stored:
+
+```yaml
+config:
+  model:
+    type: openai
+    config:
+      model: google.gemma-4-26b-a4b
+      maxTokens: 1024
+      awsSigv4:
+        region: us-east-1
+        service: bedrock
+      configuration:
+        baseURL: https://bedrock-mantle.us-east-1.api.aws/openai/v1
+```
+
+Then run with whichever profile has the permissions:
+
+```bash
+AWS_PROFILE=<profile> aux4 ai agent ask --configFile config.yaml --config --question "..."
+```
+
+`awsSigv4` takes `region`, `service`, and optionally `credentials`. Region falls back to
+`AWS_REGION` / `AWS_DEFAULT_REGION`. The OpenAI SDK insists on a non-empty `apiKey`, so a
+placeholder is filled in for you and never sent.
+
+**Permissions are split by action.** Invoking and listing are separate: a user can hold
+`bedrock:InvokeModel` and still get `AccessDeniedException` on `bedrock:ListFoundationModels`. If
+listing fails, that does not mean the model is unreachable — try calling it.
+
+The endpoint serves chat completions only; there is no `/openai/v1/models` listing (it 404s), so
+model ids come from the console, the pricing dimensions, or whoever set the account up.
 
 ## Model Selection
 

@@ -17,6 +17,8 @@ import { addDocumentExecutor } from "./commands/AddDocumentExecutor.js";
 import { searchExecutor } from "./commands/SearchExecutor.js";
 import { forgetExecutor } from "./commands/ForgetExecutor.js";
 import { askExecutor } from "./commands/AskExecutor.js";
+import { planExecutor, resumeExecutor } from "./commands/PlanExecutor.js";
+import { runToolExecutor } from "./commands/RunToolExecutor.js";
 import { imageExecutor } from "./commands/ImageExecutor.js";
 import { historyExecutor } from "./commands/HistoryExecutor.js";
 import { compactExecutor } from "./commands/CompactExecutor.js";
@@ -49,7 +51,7 @@ function parsePolicyArg(value) {
 
     if (!command) {
       console.log("Usage: aux4-agent <command> [options]");
-      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
+      console.log("Commands: learn, search, forget, ask, plan, resume, run-tool, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
       process.exit(1);
     }
 
@@ -99,7 +101,54 @@ function parsePolicyArg(value) {
         policy: parsePolicyArg(args[20]),
         runId: args[21] || "",
         costs: JSON.parse(args[22] || "{}"),
+        // Appended LAST on purpose: these args are positional, so new params must go
+        // at the end or they shift every following arg (policy/runId/costs).
+        tools: args[23] || "",
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
+      });
+    } else if (command === "plan" || command === "resume") {
+      // plan/resume share ask's positional layout so the same setup machinery is
+      // reused. resume takes one additional trailing arg: the tool-results source
+      // (a JSON file path or inline JSON array of {id, content}).
+      const commonParams = {
+        baseInstructions: args[1],
+        instructions: args[2],
+        role: args[3],
+        history: args[4],
+        outputSchema: args[5],
+        question: args[6],
+        image: args[7],
+        context: args[8],
+        model: JSON.parse(args[9] || "{}"),
+        storage: args[10],
+        stream: args[11],
+        autoCompact: args[12],
+        compaction: JSON.parse(args[13] || "{}"),
+        bio: JSON.parse(args[14] || "{}"),
+        permissions: JSON.parse(args[15] || "{}"),
+        models: JSON.parse(args[16] || "{}"),
+        useModel: args[17] || "",
+        references: args[18] || "",
+        skills: args[19] || "",
+        policy: parsePolicyArg(args[20]),
+        runId: args[21] || "",
+        costs: JSON.parse(args[22] || "{}"),
+        tools: args[23] || "",
+        packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
+      };
+      if (command === "plan") {
+        await planExecutor(commonParams);
+      } else {
+        await resumeExecutor({ ...commonParams, toolResults: args[24] || "" });
+      }
+    } else if (command === "run-tool") {
+      await runToolExecutor({
+        storage: args[1],
+        permissions: JSON.parse(args[2] || "{}"),
+        references: args[3] || "",
+        skills: args[4] || "",
+        tools: args[5] || "",
+        toolCall: args[6] || ""
       });
     } else if (command === "image") {
       await imageExecutor({
@@ -161,7 +210,7 @@ function parsePolicyArg(value) {
       });
     } else {
       console.error(`Unknown command: ${command}`.red);
-      console.log("Available commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
+      console.log("Available commands: learn, search, forget, ask, plan, resume, run-tool, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
       process.exit(1);
     }
   } catch (e) {

@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.2.4",
+  "version": "1.3.2",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Ask your question",
@@ -227,6 +227,11 @@
                 "default": ".agents/skills"
               },
               {
+                "name": "tools",
+                "text": "Optional comma-separated allow-list of tool names to bind (e.g. executeAux4,readReference); empty binds all tools",
+                "default": ""
+              },
+              {
                 "name": "policy",
                 "text": "Optional policy guardrails as an inline object (budget/allow/deny/escalate), delivered as JSON",
                 "default": ""
@@ -244,6 +249,306 @@
               {
                 "name": "question",
                 "text": "The question to ask",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "plan",
+          "execute": [
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs plan values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools) --packageDir ${packageDir}"
+          ],
+          "help": {
+            "text": "Run exactly one LLM turn and return a structured decision (final answer or tool calls) without executing tools",
+            "variables": [
+              {
+                "name": "baseInstructions",
+                "text": "Base instructions file loaded before the main instructions",
+                "default": ""
+              },
+              {
+                "name": "instructions",
+                "text": "The instructions file of the prompt",
+                "default": "AGENTS.md"
+              },
+              {
+                "name": "role",
+                "text": "The role of the user",
+                "default": "user"
+              },
+              {
+                "name": "history",
+                "text": "The file to use as conversation history (loaded and checkpointed)",
+                "default": ""
+              },
+              {
+                "name": "outputSchema",
+                "text": "The file that represents the JSON schema of the output",
+                "default": "schema.json"
+              },
+              {
+                "name": "context",
+                "text": "Read context from stdin",
+                "default": "false"
+              },
+              {
+                "name": "image",
+                "text": "The image path, if more than one, separate with comma",
+                "default": ""
+              },
+              {
+                "name": "storage",
+                "text": "The storage directory",
+                "default": ".context"
+              },
+              {
+                "name": "stream",
+                "text": "Enable streaming output",
+                "default": "false"
+              },
+              {
+                "name": "model",
+                "text": "Model configuration as JSON (e.g., {\"type\":\"openai\",\"config\":{\"model\":\"gpt-4\"}})",
+                "default": "{}"
+              },
+              {
+                "name": "autoCompact",
+                "text": "Enable auto-compaction of conversation history",
+                "default": "false"
+              },
+              {
+                "name": "compaction",
+                "text": "Compaction configuration as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "bio",
+                "text": "Agent bio as JSON (name, role, description)",
+                "default": ""
+              },
+              {
+                "name": "permissions",
+                "text": "Permissions configuration as JSON (allow, ask, deny arrays)",
+                "default": "{}"
+              },
+              {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use for this request",
+                "default": ""
+              },
+              {
+                "name": "references",
+                "text": "Path to the references directory",
+                "default": ""
+              },
+              {
+                "name": "skills",
+                "text": "Path to the skills directory",
+                "default": ".agents/skills"
+              },
+              {
+                "name": "tools",
+                "text": "Optional comma-separated allow-list of tool names to bind (e.g. executeAux4,readReference); empty binds all tools",
+                "default": ""
+              },
+              {
+                "name": "policy",
+                "text": "Optional policy guardrails as an inline object (budget/allow/deny/escalate), delivered as JSON",
+                "default": ""
+              },
+              {
+                "name": "runId",
+                "text": "Optional run identifier injected into escalation commands (auto-generated when empty)",
+                "default": ""
+              },
+              {
+                "name": "costs",
+                "text": "Optional cost rates as JSON (costIn, costOut, costCache per 1M tokens) used for the policy usd budget",
+                "default": "{}"
+              },
+              {
+                "name": "question",
+                "text": "The question or new user message for this turn (optional)",
+                "arg": true,
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "resume",
+          "execute": [
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs resume values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools, toolResults) --packageDir ${packageDir}"
+          ],
+          "help": {
+            "text": "Inject external tool results into history, then run exactly one LLM turn and return a structured decision (final answer or next tool calls)",
+            "variables": [
+              {
+                "name": "baseInstructions",
+                "text": "Base instructions file loaded before the main instructions",
+                "default": ""
+              },
+              {
+                "name": "instructions",
+                "text": "The instructions file of the prompt",
+                "default": "AGENTS.md"
+              },
+              {
+                "name": "role",
+                "text": "The role of the user",
+                "default": "user"
+              },
+              {
+                "name": "history",
+                "text": "The file to use as conversation history (loaded and checkpointed)",
+                "default": ""
+              },
+              {
+                "name": "outputSchema",
+                "text": "The file that represents the JSON schema of the output",
+                "default": "schema.json"
+              },
+              {
+                "name": "context",
+                "text": "Read context from stdin",
+                "default": "false"
+              },
+              {
+                "name": "image",
+                "text": "The image path, if more than one, separate with comma",
+                "default": ""
+              },
+              {
+                "name": "storage",
+                "text": "The storage directory",
+                "default": ".context"
+              },
+              {
+                "name": "stream",
+                "text": "Enable streaming output",
+                "default": "false"
+              },
+              {
+                "name": "model",
+                "text": "Model configuration as JSON (e.g., {\"type\":\"openai\",\"config\":{\"model\":\"gpt-4\"}})",
+                "default": "{}"
+              },
+              {
+                "name": "autoCompact",
+                "text": "Enable auto-compaction of conversation history",
+                "default": "false"
+              },
+              {
+                "name": "compaction",
+                "text": "Compaction configuration as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "bio",
+                "text": "Agent bio as JSON (name, role, description)",
+                "default": ""
+              },
+              {
+                "name": "permissions",
+                "text": "Permissions configuration as JSON (allow, ask, deny arrays)",
+                "default": "{}"
+              },
+              {
+                "name": "models",
+                "text": "Models registry as JSON",
+                "default": "{}"
+              },
+              {
+                "name": "useModel",
+                "text": "Named model from registry to use for this request",
+                "default": ""
+              },
+              {
+                "name": "references",
+                "text": "Path to the references directory",
+                "default": ""
+              },
+              {
+                "name": "skills",
+                "text": "Path to the skills directory",
+                "default": ".agents/skills"
+              },
+              {
+                "name": "tools",
+                "text": "Optional comma-separated allow-list of tool names to bind (e.g. executeAux4,readReference); empty binds all tools",
+                "default": ""
+              },
+              {
+                "name": "policy",
+                "text": "Optional policy guardrails as an inline object (budget/allow/deny/escalate), delivered as JSON",
+                "default": ""
+              },
+              {
+                "name": "runId",
+                "text": "Optional run identifier injected into escalation commands (auto-generated when empty)",
+                "default": ""
+              },
+              {
+                "name": "costs",
+                "text": "Optional cost rates as JSON (costIn, costOut, costCache per 1M tokens) used for the policy usd budget",
+                "default": "{}"
+              },
+              {
+                "name": "toolResults",
+                "text": "Tool results as a JSON file path or inline JSON array of {id, content} matching the pending tool_call ids",
+                "default": ""
+              },
+              {
+                "name": "question",
+                "text": "An optional new user message to add for this turn",
+                "arg": true,
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "run-tool",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs run-tool values(storage, permissions, references, skills, tools, toolCall)"
+          ],
+          "help": {
+            "text": "Execute exactly one tool call through the standard ai-agent tool registry and emit {id, content}",
+            "variables": [
+              {
+                "name": "storage",
+                "text": "Context storage directory",
+                "default": ".context"
+              },
+              {
+                "name": "permissions",
+                "text": "Permissions configuration as JSON (allow, ask, deny arrays)",
+                "default": "{}"
+              },
+              {
+                "name": "references",
+                "text": "Path to the references directory",
+                "default": ""
+              },
+              {
+                "name": "skills",
+                "text": "Path to the skills directory",
+                "default": ".agents/skills"
+              },
+              {
+                "name": "tools",
+                "text": "Optional comma-separated allow-list of tool names",
+                "default": ""
+              },
+              {
+                "name": "toolCall",
+                "text": "One tool call as inline JSON or a JSON file path",
                 "arg": true
               }
             ]

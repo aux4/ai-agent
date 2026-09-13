@@ -95,6 +95,16 @@ export async function summarizeMessages(messages, modelConfig, options = {}) {
   const formattedText = formatMessagesForSummary(messages);
   const prompt = loadSummarizationPrompt(options.promptFile);
 
+  // Use direct API if provided (for models using OAuth instead of API keys)
+  const directApi = options.codexApi || options.geminiCliApi;
+  if (directApi) {
+    const result = await directApi.execute([
+      { role: "system", content: prompt },
+      { role: "user", content: `Here is the conversation to summarize:\n\n${formattedText}` }
+    ], {});
+    return result.answer || "";
+  }
+
   const Model = getModel(modelConfig.type || "openai");
   const model = new Model(modelConfig.config);
 
@@ -135,7 +145,8 @@ export async function compactMessages(messages, modelConfig, options = {}) {
   const mergedOps = mergeFileOps(previousOps, fileOps);
 
   const summaryContent = await summarizeMessages(messagesToSummarize, modelConfig, {
-    promptFile: options.promptFile
+    promptFile: options.promptFile,
+    codexApi: options.codexApi
   });
 
   // Append file tracking to the structured summary

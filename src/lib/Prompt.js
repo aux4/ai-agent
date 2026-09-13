@@ -4,7 +4,8 @@ import path from "node:path";
 import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { getModel } from "./Models.js";
-import { readFile, asJson } from "./util/FileUtils.js";
+import { createAwsSigV4Fetch } from "./AwsSigV4Fetch.js";
+import { readFile, asJson, ensureParentDirectorySync } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
@@ -13,6 +14,8 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
 import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
+import { GeminiCliApi } from "./GeminiCliApi.js";
+import { loadGeminiAuth } from "./GeminiAuth.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -44,12 +47,36 @@ class Prompt {
         throw new PromptError("Codex auth not found. Run 'codex login' first.");
       }
       this.codexApi = new CodexApi({ ...(config.config || {}), ...codexAuth });
+    } else if (this.apiType === "gemini-cli") {
+      const geminiAuth = loadGeminiAuth();
+      if (!geminiAuth) {
+        throw new PromptError("Gemini CLI auth not found. Run 'gemini' to authenticate first, or set GEMINI_CLI_REFRESH_TOKEN.");
+      }
+      this.geminiCliApi = new GeminiCliApi({ ...(config.config || {}), ...geminiAuth });
     } else {
       const Model = getModel(config.type || "openai");
-      const chatConfig = config.config || {};
+      const chatConfig = { ...(config.config || {}) };
       if (!chatConfig.model && (config.type || "openai") === "openai") {
         chatConfig.model = "gpt-5-mini";
       }
+
+      // `awsSigv4: { region, service }` targets an AWS OpenAI-compatible endpoint
+      // (e.g. Bedrock). Requests are signed with the standard AWS credential chain, so no
+      // API key is needed — the SDK still wants a non-empty apiKey, which is never sent.
+      if (chatConfig.awsSigv4) {
+        const { region, service, credentials } = chatConfig.awsSigv4;
+        delete chatConfig.awsSigv4;
+        chatConfig.apiKey = chatConfig.apiKey || "aws-sigv4";
+        chatConfig.configuration = {
+          ...(chatConfig.configuration || {}),
+          fetch: createAwsSigV4Fetch({
+            region: region || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION,
+            service,
+            credentials
+          })
+        };
+      }
+
       this.model = new Model(chatConfig);
     }
   }
@@ -86,6 +113,15 @@ class Prompt {
       this.codexApi.bindTools(Object.values(configuredTools));
       if (mcpTools.length > 0) {
         this.codexApi.bindTools(mcpTools);
+      }
+      this.tools = {
+        ...configuredTools,
+        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
+      };
+    } else if (this.apiType === "gemini-cli") {
+      this.geminiCliApi.bindTools(Object.values(configuredTools));
+      if (mcpTools.length > 0) {
+        this.geminiCliApi.bindTools(mcpTools);
       }
       this.tools = {
         ...configuredTools,
@@ -148,7 +184,7 @@ class Prompt {
     this.tokenCallback = callback;
   }
 
-  async message(text, params, role = "user") {
+  async _pushUserMessage(text, params, role = "user") {
     const messageContent = await replacePromptVariables(text, params);
 
     const message = {
@@ -200,12 +236,67 @@ class Prompt {
     message.timestamp = Date.now();
     this.messages.push(message);
     this.saveHistory();
+  }
+
+  async message(text, params, role = "user") {
+    await this._pushUserMessage(text, params, role);
 
     const answer = await this.execute();
 
     if (this.callback) {
       this.callback(`${answer}`);
     }
+  }
+
+  // PLAN/RESUME primitive: run exactly ONE LLM turn WITHOUT executing tools and
+  // WITHOUT recursing. execute() checkpoints the resulting assistant message
+  // (final answer or tool_calls) into --history via its existing saveHistory
+  // calls. Returns a structured result:
+  //   { status: "final", text }
+  //   { status: "tool_calls", toolCalls: [{ id, name, arguments }] }
+  // This is strictly additive: it only runs when planOnly is set, so the classic
+  // synchronous execute() path is byte-identical when plan mode is not requested.
+  async plan(text, params, role = "user") {
+    this.planOnly = true;
+    if (text !== undefined && text !== null && text !== "") {
+      await this._pushUserMessage(text, params, role);
+    }
+    return await this.execute();
+  }
+
+  // RESUME support: append externally-produced tool results to history as
+  // provider-formatted tool messages, matching the tool_call ids emitted by the
+  // most recent assistant_with_tool checkpoint. Mirrors the tool-result entry
+  // shape execute() produces when it runs tools in-process, so the next plan turn
+  // sees a correctly-paired assistant/tool exchange.
+  injectToolResults(toolResults = []) {
+    let toolCalls = [];
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i];
+      if (m.role === "assistant_with_tool") {
+        const content = m.content || {};
+        toolCalls =
+          content.tool_calls ||
+          (content.kwargs && content.kwargs.tool_calls) ||
+          [];
+        break;
+      }
+    }
+    const nameById = {};
+    for (const tc of toolCalls) {
+      if (tc && tc.id) nameById[tc.id] = tc.name;
+    }
+    for (const tr of toolResults) {
+      const content = typeof tr.content === "string" ? tr.content : JSON.stringify(tr.content);
+      this.messages.push({
+        role: "tool",
+        content,
+        tool_call_id: tr.id,
+        name: nameById[tr.id] || tr.name || "unknown",
+        timestamp: Date.now()
+      });
+    }
+    this.saveHistory();
   }
 
   async execute() {
@@ -215,6 +306,10 @@ class Prompt {
 
     if (this.apiType === "codex") {
       return await this._executeCodex();
+    }
+
+    if (this.apiType === "gemini-cli") {
+      return await this._executeGeminiCli();
     }
 
     let messages = this.messages;
@@ -316,6 +411,21 @@ class Prompt {
       if (response.tool_calls && response.tool_calls.length > 0) {
         this.messages.push({ role: "assistant_with_tool", content: response, timestamp: Date.now() });
         this.saveHistory();
+
+        // PLAN mode: decide, don't act. The assistant tool-call message is now
+        // checkpointed in --history; stop here without executing tools or
+        // recursing. An external orchestrator runs the tools and calls resume
+        // with their results for the next turn.
+        if (this.planOnly) {
+          return {
+            status: "tool_calls",
+            toolCalls: response.tool_calls.map(toolCall => ({
+              id: toolCall.id,
+              name: toolCall.name,
+              arguments: toolCall.args || {}
+            }))
+          };
+        }
 
         // Pre-process saveImage tool calls to extract full base64 from previous tool responses
         for (const toolCall of response.tool_calls) {
@@ -435,6 +545,28 @@ class Prompt {
               ? response.content.filter(c => c.type === "text").map(c => c.text).join("") || JSON.stringify(response)
               : JSON.stringify(response);
 
+      // No tool calls AND nothing said is not an answer -- the model stopped generating
+      // mid-task. Terminating here ends the run silently, which reads downstream as "the agent
+      // decided it was finished" when it simply died. Retry once before believing it.
+      if (!answer || !answer.trim()) {
+        this._emptyRetried = (this._emptyRetried || 0) + 1;
+        if (this._emptyRetried <= 2) {
+          // Retrying the IDENTICAL context reproduces the identical stall -- observed failing
+          // every time. Append a nudge so the next request differs from the one that died, and
+          // give it two attempts rather than one.
+          console.error(`[agent] empty response with no tool calls -- retry ${this._emptyRetried}/2`);
+          this.messages.push({
+            role: "user",
+            content: "You returned nothing. Look at the last tool result, say what state you are in, and take the next action.",
+            timestamp: Date.now()
+          });
+          return await this.execute();
+        }
+        answer = "The model returned an empty response three times in a row and the task was not completed.";
+      } else {
+        this._emptyRetried = 0;
+      }
+
       if (this.outputSchema) {
         let jsonStr = answer.trim();
         const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
@@ -466,6 +598,12 @@ class Prompt {
       }
 
       this.saveHistory(true);
+
+      // PLAN mode: the model produced a final answer with no tool calls. The
+      // assistant message is checkpointed; return the structured final result.
+      if (this.planOnly) {
+        return { status: "final", text: answer };
+      }
 
       return answer;
     } catch (e) {
@@ -533,6 +671,59 @@ class Prompt {
               keepLastMessages: this.compactionConfig.keepLastMessages || 6,
               promptFile: this.compactionConfig.promptFile,
               codexApi: (!this.compactionConfig.model && this.apiType === "codex") ? this.codexApi : null
+            });
+            this.compacted = true;
+          } catch (err) {
+            console.error(`[compact] Warning: ${err.message}`);
+          }
+        }
+      }
+
+      this.saveHistory(true);
+      return answer;
+    } catch (e) {
+      this.saveHistory(true);
+      throw new PromptError(e.message, e);
+    }
+  }
+
+  async _executeGeminiCli() {
+    try {
+      const result = await this.geminiCliApi.execute(this.messages, {
+        streaming: this.streaming && !this.outputSchema,
+        tokenCallback: this.tokenCallback,
+        outputSchema: this.outputSchema
+      });
+
+      this.tokenUsage.input += result.usage.input || 0;
+      this.tokenUsage.output += result.usage.output || 0;
+      this.tokenUsage.cached += result.usage.cached || 0;
+      this.tokenUsage.total += (result.usage.input || 0) + (result.usage.output || 0);
+
+      let answer = result.answer;
+
+      if (this.outputSchema) {
+        let jsonStr = answer.trim();
+        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+        if (codeBlockMatch) {
+          jsonStr = codeBlockMatch[1].trim();
+        }
+        const zodSchema = buildZodSchema(this.outputSchema);
+        const parsed = zodSchema.parse(JSON.parse(jsonStr));
+        answer = JSON.stringify(parsed);
+      }
+
+      this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
+
+      if (this.compactionConfig && this.compactionConfig.contextWindow) {
+        const promptTokens = result.usage.input || 0;
+        if (shouldCompact(promptTokens, this.compactionConfig)) {
+          const compactionModel = this.compactionConfig.model || this.config;
+          try {
+            this.messages = await compactMessages(this.messages, compactionModel, {
+              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
+              promptFile: this.compactionConfig.promptFile,
+              geminiCliApi: (!this.compactionConfig.model && this.apiType === "gemini-cli") ? this.geminiCliApi : null
             });
             this.compacted = true;
           } catch (err) {
@@ -618,7 +809,10 @@ class Prompt {
       }
 
       // Always write synchronously to prevent 0-byte files from async
-      // truncation when the process exits before the write completes.
+      // truncation when the process exits before the write completes. A new
+      // durable workflow supplies a per-execution path whose parent does not
+      // exist yet in a fresh Lambda container, so create it before writing.
+      ensureParentDirectorySync(this.historyFile);
       fs.writeFileSync(this.historyFile, data);
     } catch (error) {
       console.error("Error writing history file:", error.message);

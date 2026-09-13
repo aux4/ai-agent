@@ -65,11 +65,11 @@ rm -f history.json
 #### View the history
 
 ```execute
-if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "executeAux4(command: print-name --firstName John --lastName Doe)"; echo "User Doe, John from the tool"; else aux4 ai agent history; fi
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "executeAux4(command: aux4 print-name --firstName John --lastName Doe)"; echo "User Doe, John from the tool"; else aux4 ai agent history; fi
 ```
 
 ```expect:partial
-executeAux4(command: print-name --firstName *John* --lastName *Doe*)
+executeAux4(command: *print-name --firstName *John* --lastName *Doe*)
 ```
 
 ```expect:partial
