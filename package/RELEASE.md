@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.3.2
+
+- History checkpoints now create their parent directory before the synchronous
+  write. Fresh serverless agent executions can persist their first turn instead
+  of swallowing an `ENOENT` and resuming without the question or tool-call context.
+
 ## 1.3.1
 
 - Added `ai agent run-tool`, a single-tool execution primitive for durable

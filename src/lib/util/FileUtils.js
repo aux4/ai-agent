@@ -1,4 +1,9 @@
-import { promises as fsPromises } from "fs";
+import fs, { promises as fsPromises } from "fs";
+import path from "path";
+
+export function ensureParentDirectorySync(file) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+}
 
 export async function readFile(file) {
   if (!file) {

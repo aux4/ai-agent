@@ -5,7 +5,7 @@ import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { getModel } from "./Models.js";
 import { createAwsSigV4Fetch } from "./AwsSigV4Fetch.js";
-import { readFile, asJson } from "./util/FileUtils.js";
+import { readFile, asJson, ensureParentDirectorySync } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
@@ -809,7 +809,10 @@ class Prompt {
       }
 
       // Always write synchronously to prevent 0-byte files from async
-      // truncation when the process exits before the write completes.
+      // truncation when the process exits before the write completes. A new
+      // durable workflow supplies a per-execution path whose parent does not
+      // exist yet in a fresh Lambda container, so create it before writing.
+      ensureParentDirectorySync(this.historyFile);
       fs.writeFileSync(this.historyFile, data);
     } catch (error) {
       console.error("Error writing history file:", error.message);
