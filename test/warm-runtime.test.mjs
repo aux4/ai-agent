@@ -1,17 +1,54 @@
 import assert from "node:assert/strict";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 
-import { executeWarmRuntimeRequest } from "../src/bin/WarmRuntimeServer.js";
+import { executeWarmRuntimeRequest, serveWarmRuntime } from "../src/bin/WarmRuntimeServer.js";
 import { runtimeRequestInput } from "../src/lib/RuntimeContext.js";
 import {
   WARM_RUNTIME_PROTOCOL,
+  encodeFrame,
+  frameReader,
   runtimeIdentity,
   runtimeSocketPath,
   sanitizedEnvironment
 } from "../src/lib/WarmRuntimeProtocol.js";
+
+async function connectWhenReady(socketPath) {
+  let lastError;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const socket = net.createConnection(socketPath);
+        socket.once("connect", () => resolve(socket));
+        socket.once("error", reject);
+      });
+    } catch (error) {
+      lastError = error;
+      await delay(5);
+    }
+  }
+  throw lastError;
+}
+
+function sendHalfClosedRequest(socket, value) {
+  return new Promise((resolve, reject) => {
+    let received = false;
+    socket.on("data", frameReader(response => {
+      if (received) return;
+      received = true;
+      resolve(response);
+    }, reject));
+    socket.once("error", reject);
+    socket.once("end", () => {
+      if (!received) reject(new Error("server closed without a response"));
+    });
+    socket.end(encodeFrame(value));
+  });
+}
 
 function request(identity, cwd, overrides = {}) {
   return {
@@ -84,6 +121,28 @@ test("warm runtime rejects a stale package identity", async () => {
     }),
     /identity mismatch/
   );
+});
+
+test("warm socket returns after the client half-closes its request side", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "aux4-ai-socket-"));
+  const socketPath = path.join(dir, "runtime.sock");
+  const identity = "socket-runtime";
+  const server = await serveWarmRuntime({
+    socketPath,
+    identity,
+    dispatch: async () => { await delay(20); },
+    reportError: () => {}
+  });
+
+  try {
+    const socket = await connectWhenReady(socketPath);
+    const response = await sendHalfClosedRequest(socket, request(identity, process.cwd()));
+    assert.equal(response.protocol, WARM_RUNTIME_PROTOCOL);
+    assert.equal(response.exitCode, 0);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("runtime identity and socket change when the installed artifact changes", async () => {

@@ -90,7 +90,10 @@ export async function serveWarmRuntime({ socketPath, identity, dispatch, reportE
   }
 
   let queue = Promise.resolve();
-  const server = net.createServer(socket => {
+  // The client half-closes its write side after sending its single framed
+  // request. Keep the server's write side open until the asynchronous command
+  // completes and its framed response has been sent.
+  const server = net.createServer({ allowHalfOpen: true }, socket => {
     let received = false;
     const fail = error => {
       if (!socket.destroyed) socket.destroy(error);
@@ -125,4 +128,5 @@ export async function serveWarmRuntime({ socketPath, identity, dispatch, reportE
   process.once("exit", cleanup);
   process.once("SIGTERM", () => server.close(() => process.exit(0)));
   process.once("SIGINT", () => server.close(() => process.exit(0)));
+  return server;
 }

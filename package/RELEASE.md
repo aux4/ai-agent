@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.3.5
+
+- Keep the warm runtime socket's response side open after its one-request client
+  half-closes the write side. This lets asynchronous planning and tool phases
+  return their framed result instead of failing with `Warm runtime closed without
+  a response`.
+- Add a real Unix-socket lifecycle test covering that half-close behavior.
+
 ## 1.3.4
 
 - `plan`, `run-tool`, and `resume` now reuse a package-identity-bound resident runtime in
