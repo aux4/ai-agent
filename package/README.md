@@ -220,7 +220,9 @@ For bounded tools, an orchestrator can execute the complete tool batch and the n
 planning turn in one warm-runtime request. This removes one Lambda transition and
 discovers the tool registry only once. `--historySeed` can carry the exact checkpoint
 from a planning turn that ran before the durable workflow started; it initializes only
-a missing history file and never overwrites a newer checkpoint.
+a missing history file and never overwrites a newer checkpoint. Workflow callers should
+use `--historySeedBase64` and `--toolCallsBase64` so structured JSON survives command and
+shell argument boundaries unchanged.
 
 Keep using separate `run-tool` and `resume` states for tools that need to suspend
 independently or may run longer than one Lambda invocation.

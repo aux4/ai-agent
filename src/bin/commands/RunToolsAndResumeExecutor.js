@@ -4,6 +4,16 @@ import { dirname } from "node:path";
 import { timed } from "../../lib/Timing.js";
 
 const MAX_HISTORY_SEED_BYTES = 128 * 1024;
+const MAX_TOOL_CALLS_BYTES = 128 * 1024;
+
+function decodeBase64Json(value, label, maxBytes) {
+  if (value === undefined || value === null || value === "" || value === "null" || value === "-") return null;
+  const decoded = Buffer.from(String(value), "base64").toString("utf8");
+  if (Buffer.byteLength(decoded) > maxBytes) {
+    throw new Error(`${label} exceeds the 128 KiB limit`);
+  }
+  return JSON.stringify(JSON.parse(decoded));
+}
 
 function normalizeHistorySeed(value) {
   if (value === undefined || value === null || value === "" || value === "null") return null;
@@ -47,7 +57,18 @@ export async function runToolsAndResumeExecutor(params, options = {}) {
     return resumeExecutor(resumeParams);
   });
 
-  await timed("agent.history-seed", () => seed(params.history, params.historySeed));
-  const toolResults = await runTools({ ...params, toolCalls: params.toolCalls });
+  const historySeed = decodeBase64Json(
+    params.historySeedBase64,
+    "History seed",
+    MAX_HISTORY_SEED_BYTES
+  ) || params.historySeed;
+  const toolCalls = decodeBase64Json(
+    params.toolCallsBase64,
+    "Tool calls",
+    MAX_TOOL_CALLS_BYTES
+  ) || params.toolCalls;
+
+  await timed("agent.history-seed", () => seed(params.history, historySeed));
+  const toolResults = await runTools({ ...params, toolCalls });
   return resume({ ...params, toolResults });
 }

@@ -161,6 +161,11 @@ aux4 ai agent image --prompt "…" --image out.png \
 
 - `searchText` ranks by word overlap; a few plain words work better than a sentence.
 - The head/tail split and the 10KB limit are not configurable yet.
+# 1.3.7
+
+- Adds bounded base64 inputs for fused tool calls and history checkpoints so
+  structured workflow payloads survive the command/shell boundary unchanged.
+
 # 1.3.6
 
 - Adds `ai agent run-tools-and-resume`, an opt-in durable fast path that executes a complete tool batch and the next planning turn in one warm-runtime request.

@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -557,7 +557,7 @@
         {
           "name": "run-tools-and-resume",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent-client.cjs run-tools-and-resume values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools, toolCalls, historySeed) --packageDir ${packageDir}"
+            "node ${packageDir}/lib/aux4-ai-agent-client.cjs run-tools-and-resume values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools, toolCalls, historySeed, toolCallsBase64, historySeedBase64) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Execute a batch of external tool calls and resume one planning turn in the same warm runtime request",
@@ -585,8 +585,10 @@
               { "name": "runId", "text": "Optional run identifier", "default": "" },
               { "name": "costs", "text": "Token cost rates JSON", "default": "{}" },
               { "name": "tools", "text": "Optional comma-separated tool allow-list", "default": "" },
-              { "name": "toolCalls", "text": "Tool-call object or array as inline JSON or a JSON file path", "arg": true },
-              { "name": "historySeed", "text": "Optional initial history checkpoint JSON used only when the history file does not exist", "default": "" }
+              { "name": "toolCalls", "text": "Tool-call object or array as inline JSON or a JSON file path", "default": "-" },
+              { "name": "historySeed", "text": "Optional initial history checkpoint JSON used only when the history file does not exist", "default": "-" },
+              { "name": "toolCallsBase64", "text": "Base64-encoded tool-call JSON for shell-safe workflow transport", "default": "-" },
+              { "name": "historySeedBase64", "text": "Base64-encoded history checkpoint JSON for shell-safe workflow transport", "default": "-" }
             ]
           }
         },

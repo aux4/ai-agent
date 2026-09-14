@@ -21,7 +21,7 @@ Execute a batch of external tool calls and resume one planning turn in the same 
 ```
 
 ```execute
-AUX4_NO_DAEMON=1 aux4 ai agent run-tools-and-resume '[{"id":"t1","name":"currentDateTime","arguments":{}}]' --history /tmp/aux4-invalid-fused-history.json --historySeed '{"notMessages":[]}'
+AUX4_NO_DAEMON=1 aux4 ai agent run-tools-and-resume --toolCalls '[{"id":"t1","name":"currentDateTime","arguments":{}}]' --history /tmp/aux4-invalid-fused-history.json --historySeed '{"notMessages":[]}'
 ```
 
 ```error:partial

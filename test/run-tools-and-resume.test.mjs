@@ -57,6 +57,25 @@ test("runs one tool batch and passes its results directly to resume", async () =
   ]);
 });
 
+test("decodes structured checkpoint and tool calls from base64-safe command arguments", async () => {
+  const calls = [];
+  const toolCalls = [{ id: "t1", name: "search", arguments: { q: "quoted value" } }];
+  await runToolsAndResumeExecutor({
+    history: "/tmp/session.json",
+    historySeedBase64: Buffer.from(JSON.stringify(seed)).toString("base64"),
+    toolCallsBase64: Buffer.from(JSON.stringify(toolCalls)).toString("base64")
+  }, {
+    seedHistory: async (_history, historySeed) => calls.push(["seed", JSON.parse(historySeed)]),
+    runToolCalls: async params => {
+      calls.push(["tools", JSON.parse(params.toolCalls)]);
+      return [];
+    },
+    resumeExecutor: async () => ({ status: "final", text: "done" })
+  });
+
+  assert.deepEqual(calls, [["seed", seed], ["tools", toolCalls]]);
+});
+
 test("rejects malformed history seeds before executing tools", async () => {
   await assert.rejects(
     runToolsAndResumeExecutor({
