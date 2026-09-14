@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -551,6 +551,42 @@
                 "text": "One tool call as inline JSON or a JSON file path",
                 "arg": true
               }
+            ]
+          }
+        },
+        {
+          "name": "run-tools-and-resume",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent-client.cjs run-tools-and-resume values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools, toolCalls, historySeed) --packageDir ${packageDir}"
+          ],
+          "help": {
+            "text": "Execute a batch of external tool calls and resume one planning turn in the same warm runtime request",
+            "variables": [
+              { "name": "baseInstructions", "text": "Base instructions file", "default": "" },
+              { "name": "instructions", "text": "Agent instructions file", "default": "AGENTS.md" },
+              { "name": "role", "text": "Role for an optional new message", "default": "user" },
+              { "name": "history", "text": "Durable conversation history file", "default": "" },
+              { "name": "outputSchema", "text": "Structured output schema file", "default": "schema.json" },
+              { "name": "question", "text": "Optional new user message", "default": "" },
+              { "name": "image", "text": "Optional image paths", "default": "" },
+              { "name": "context", "text": "Read context from stdin", "default": "false" },
+              { "name": "model", "text": "Model configuration JSON", "default": "{}" },
+              { "name": "storage", "text": "Context storage directory", "default": ".context" },
+              { "name": "stream", "text": "Enable streaming output", "default": "false" },
+              { "name": "autoCompact", "text": "Enable history compaction", "default": "false" },
+              { "name": "compaction", "text": "Compaction configuration JSON", "default": "{}" },
+              { "name": "bio", "text": "Agent bio JSON", "default": "{}" },
+              { "name": "permissions", "text": "Tool permissions JSON", "default": "{}" },
+              { "name": "models", "text": "Named model registry JSON", "default": "{}" },
+              { "name": "useModel", "text": "Named model to use", "default": "" },
+              { "name": "references", "text": "References directory", "default": "" },
+              { "name": "skills", "text": "Skills directory", "default": ".agents/skills" },
+              { "name": "policy", "text": "Policy guardrails JSON", "default": "" },
+              { "name": "runId", "text": "Optional run identifier", "default": "" },
+              { "name": "costs", "text": "Token cost rates JSON", "default": "{}" },
+              { "name": "tools", "text": "Optional comma-separated tool allow-list", "default": "" },
+              { "name": "toolCalls", "text": "Tool-call object or array as inline JSON or a JSON file path", "arg": true },
+              { "name": "historySeed", "text": "Optional initial history checkpoint JSON used only when the history file does not exist", "default": "" }
             ]
           }
         },

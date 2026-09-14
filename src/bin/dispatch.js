@@ -4,6 +4,7 @@ import { forgetExecutor } from "./commands/ForgetExecutor.js";
 import { askExecutor } from "./commands/AskExecutor.js";
 import { planExecutor, resumeExecutor } from "./commands/PlanExecutor.js";
 import { runToolExecutor } from "./commands/RunToolExecutor.js";
+import { runToolsAndResumeExecutor } from "./commands/RunToolsAndResumeExecutor.js";
 import { imageExecutor } from "./commands/ImageExecutor.js";
 import { historyExecutor } from "./commands/HistoryExecutor.js";
 import { compactExecutor } from "./commands/CompactExecutor.js";
@@ -39,7 +40,7 @@ export async function dispatchCommand(args) {
   const command = args[0];
   if (!command) {
     console.log("Usage: aux4-agent <command> [options]");
-    console.log("Commands: learn, search, forget, ask, plan, resume, run-tool, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
+    console.log("Commands: learn, search, forget, ask, plan, resume, run-tool, run-tools-and-resume, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
     const error = new Error("Command is required");
     error.exitCode = 1;
     error.silent = true;
@@ -58,6 +59,13 @@ export async function dispatchCommand(args) {
       skills: args[4] || "", tools: args[5] || "", toolCall: args[6] || ""
     });
   }
+  if (command === "run-tools-and-resume") {
+    return await runToolsAndResumeExecutor({
+      ...commonAgentParams(args),
+      toolCalls: args[24] || "",
+      historySeed: args[25] || ""
+    });
+  }
   if (command === "image") return await imageExecutor({ prompt: args[1], image: args[2], size: args[3], quality: args[4], context: args[5], model: JSON.parse(args[6] || "{}"), quantity: parseInt(args[7] || "1") });
   if (command === "history") return await historyExecutor({ historyFile: args[1], costIn: parseFloat(args[2]) || 0, costOut: parseFloat(args[3]) || 0, costCache: parseFloat(args[4]) || 0 });
   if (command === "summarize") return await summarizeExecutor({ historyFile: args[1], model: JSON.parse(args[2] || "{}"), models: JSON.parse(args[3] || "{}"), useModel: args[4] || "" });
@@ -68,7 +76,7 @@ export async function dispatchCommand(args) {
   if (command === "policy-resolve") return await policyResolveExecutor({ id: args[1], decision: args[2] });
 
   console.error(`Unknown command: ${command}`);
-  console.log("Available commands: learn, search, forget, ask, plan, resume, run-tool, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
+  console.log("Available commands: learn, search, forget, ask, plan, resume, run-tool, run-tools-and-resume, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
   const error = new Error(`Unknown command: ${command}`);
   error.exitCode = 1;
   error.silent = true;

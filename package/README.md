@@ -7,7 +7,8 @@ Lightweight AI agent runtime for aux4 with RAG, tool usage, image generation, an
 - Generate images from text prompts
 - Let the agent call local aux4 commands as tools during conversations
 - Inspect conversation history and run interactive chat loops
-- Decompose durable runs with `plan`, `run-tool`, and `resume`; every step uses
+- Decompose durable runs with `plan`, `run-tool`, `resume`, and the optional
+  fused `run-tools-and-resume`; every step uses
   the same tool registry and permission behavior as `ask`
 
 ## Installation
@@ -212,6 +213,17 @@ aux4 ai agent resume --configFile config.yaml --config agent \
 ```
 
 The answer is drawn from the injected result — the agent used the externally-supplied value rather than executing the tool itself.
+
+### aux4 ai agent run-tools-and-resume
+
+For bounded tools, an orchestrator can execute the complete tool batch and the next
+planning turn in one warm-runtime request. This removes one Lambda transition and
+discovers the tool registry only once. `--historySeed` can carry the exact checkpoint
+from a planning turn that ran before the durable workflow started; it initializes only
+a missing history file and never overwrites a newer checkpoint.
+
+Keep using separate `run-tool` and `resume` states for tools that need to suspend
+independently or may run longer than one Lambda invocation.
 
 ### The orchestration loop
 
@@ -1385,7 +1397,7 @@ This pattern is used in the context tests where several context files are learne
 
 ## Warm durable runtime
 
-The `plan`, `run-tool`, and `resume` commands automatically reuse one resident agent
+The `plan`, `run-tool`, `resume`, and `run-tools-and-resume` commands automatically reuse one resident agent
 runtime while their Cloud VM container remains warm. The first command loads the runtime;
 later commands avoid loading the full model and tool libraries again. Command output,
 permissions, working directory, environment, and history behavior remain the same.
