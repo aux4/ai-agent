@@ -1,4 +1,8 @@
+import { runtimeRequestInput } from "../RuntimeContext.js";
+
 export async function readStdIn() {
+  const injected = runtimeRequestInput();
+  if (injected !== undefined) return injected;
   return read(process.openStdin());
 }
 

@@ -4,8 +4,22 @@ import Prompt, { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
-import { loadSkillsCatalog } from "../../lib/Skills.js";
 import { Policy } from "../../lib/Policy.js";
+import { loadSkillsCatalogMetadata, readRuntimeMetadata } from "../../lib/RuntimeMetadataCache.js";
+import { isWarmRuntimeRequest } from "../../lib/RuntimeContext.js";
+import { startTiming } from "../../lib/Timing.js";
+
+async function loadMetadata(loader, value) {
+  const end = startTiming("package.discovery");
+  try {
+    const result = await loader(value);
+    end("ok", { cacheHit: isWarmRuntimeRequest() && result.cacheHit });
+    return result.value;
+  } catch (error) {
+    end("error", { cacheHit: false });
+    throw error;
+  }
+}
 
 // Shared agent setup used by ask (synchronous), plan and resume (single-turn).
 // Builds and initializes the Prompt with the exact same machinery as ask —
@@ -114,13 +128,13 @@ export async function buildAgentPrompt(params) {
   }
 
   if (baseInstructions) {
-    await prompt.instructions(await readFile(baseInstructions), params);
+    await prompt.instructions(await loadMetadata(readRuntimeMetadata, baseInstructions), params);
   }
   if (instructionsFile) {
-    await prompt.instructions(await readFile(instructionsFile), params);
+    await prompt.instructions(await loadMetadata(readRuntimeMetadata, instructionsFile), params);
   }
 
-  const skillsCatalog = loadSkillsCatalog(skills);
+  const skillsCatalog = await loadMetadata(loadSkillsCatalogMetadata, skills);
   if (skillsCatalog) {
     await prompt.instructions(skillsCatalog);
   }
@@ -155,7 +169,7 @@ export async function askExecutor(params) {
 
     await prompt.message(message, params, role);
 
-    prompt.close();
+    await prompt.close();
   } catch (error) {
     if (error instanceof PromptError) {
       console.error("Prompt error:", error.message);

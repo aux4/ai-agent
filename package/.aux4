@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -257,7 +257,7 @@
         {
           "name": "plan",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs plan values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent-client.cjs plan values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Run exactly one LLM turn and return a structured decision (final answer or tool calls) without executing tools",
@@ -384,7 +384,7 @@
         {
           "name": "resume",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs resume values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools, toolResults) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent-client.cjs resume values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools, toolResults) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Inject external tool results into history, then run exactly one LLM turn and return a structured decision (final answer or next tool calls)",
@@ -516,7 +516,7 @@
         {
           "name": "run-tool",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs run-tool values(storage, permissions, references, skills, tools, toolCall)"
+            "node ${packageDir}/lib/aux4-ai-agent-client.cjs run-tool values(storage, permissions, references, skills, tools, toolCall)"
           ],
           "help": {
             "text": "Execute exactly one tool call through the standard ai-agent tool registry and emit {id, content}",

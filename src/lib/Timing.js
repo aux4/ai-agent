@@ -36,14 +36,14 @@ export function startTiming(span) {
   };
 }
 
-export async function timed(span, operation) {
+export async function timed(span, operation, attributes = {}) {
   const end = startTiming(span);
   try {
     const result = await operation();
-    end("ok");
+    end("ok", attributes);
     return result;
   } catch (error) {
-    end("error");
+    end("error", attributes);
     throw error;
   }
 }

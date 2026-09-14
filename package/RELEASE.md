@@ -1,5 +1,17 @@
 # Release notes
 
+## 1.3.4
+
+- `plan`, `run-tool`, and `resume` now reuse a package-identity-bound resident runtime in
+  warm Cloud VM containers, avoiding repeated loading of the full agent/model/tool bundle.
+  The client falls back to the existing direct process when the resident runtime cannot be
+  started.
+- Instruction and skill metadata caches invalidate from file identity. Model/tool
+  configuration, messages, history, execution state, working directory, and credentials
+  remain request-local; sensitive environment values are removed while the runtime is idle.
+- Runtime startup and discovery timing records now report `cacheHit` and `cold` without
+  including prompts, command arguments, output, URLs, or credentials.
+
 ## 1.3.3
 
 - Added opt-in, stderr-only runtime timing records for agent bootstrap, package/tool

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createTools } from "../../lib/Tools.js";
 import { timed } from "../../lib/Timing.js";
+import { isWarmRuntimeRequest } from "../../lib/RuntimeContext.js";
 
 async function parseToolCall(value) {
   if (value && typeof value === "object") return value;
@@ -30,7 +31,7 @@ export async function runToolExecutor(params) {
     references: params.references || "",
     skills: params.skills || ".agents/skills",
     tools: String(params.tools || "").split(",").map(name => name.trim()).filter(Boolean)
-  }));
+  }), { cacheHit: isWarmRuntimeRequest() });
   const selected = tools[call.name];
   let content;
   try {

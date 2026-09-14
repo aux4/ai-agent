@@ -11,6 +11,10 @@ Tool results are supplied with `--toolResults`, as either a path to a JSON file 
 
 Under the hood, resume is simply `plan` preceded by injecting the tool results — it is the same single-turn primitive, reusing all of `ask`'s setup (model/provider resolution, tool-schema building, instructions/bio/skills, permissions, `--history` load/save). Like `plan`, it does not execute tools itself and does not recurse.
 
+On a warm Cloud VM, `resume` reuses the resident agent runtime loaded by an earlier durable
+agent command. It reloads request-specific model/tool configuration and history, and clears
+the invocation environment and credentials before serving another command.
+
 #### Usage
 
 ```bash

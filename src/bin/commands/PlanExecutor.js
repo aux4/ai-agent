@@ -15,7 +15,7 @@ export async function planExecutor(params) {
     const { prompt, message, role } = await timed("agent.bootstrap", () => buildAgentPrompt(params));
     const result = await timed("agent.plan", () => prompt.plan(message, params, role));
     console.log(JSON.stringify(result));
-    prompt.close();
+    await prompt.close();
   } catch (error) {
     reportError(error, "planExecutor");
     throw error;
@@ -35,7 +35,7 @@ export async function resumeExecutor(params) {
     prompt.injectToolResults(toolResults);
     const result = await timed("agent.plan", () => prompt.plan(message, params, role));
     console.log(JSON.stringify(result));
-    prompt.close();
+    await prompt.close();
   } catch (error) {
     reportError(error, "resumeExecutor");
     throw error;

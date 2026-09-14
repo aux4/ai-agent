@@ -13,6 +13,11 @@ This primitive is intended for durable orchestrators that sequence
 as the path to a JSON file. Tool exceptions are returned as an `Error: ...`
 result for the next planning turn instead of terminating the workflow.
 
+On a warm Cloud VM, `run-tool` reuses the resident agent runtime, avoiding repeated model and
+tool-library startup. Permissions, tool selection, working directory, environment, and tool
+arguments are still evaluated independently for every invocation; credentials and tool
+results are not retained between commands.
+
 #### Usage
 
 ```bash

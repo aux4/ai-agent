@@ -8,7 +8,7 @@ import { createAwsSigV4Fetch } from "./AwsSigV4Fetch.js";
 import { readFile, asJson, ensureParentDirectorySync } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
-import Tools, { createTools } from "./Tools.js";
+import { createTools } from "./Tools.js";
 import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
@@ -17,6 +17,7 @@ import { loadCodexAuth } from "./TokenRefresh.js";
 import { GeminiCliApi } from "./GeminiCliApi.js";
 import { loadGeminiAuth } from "./GeminiAuth.js";
 import { internalTraceHeaders, timed } from "./Timing.js";
+import { isWarmRuntimeRequest } from "./RuntimeContext.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -107,8 +108,12 @@ class Prompt {
     }
 
     // Create tools with configuration if provided
-    const configuredTools = await timed("package.discovery", async () =>
-      Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools
+    const configuredTools = await timed(
+      "package.discovery",
+      // Always create request-local wrappers. The resident process reuses the
+      // imported schemas/docs, never loop-detection or policy state.
+      async () => createTools(this.toolsConfig),
+      { cacheHit: isWarmRuntimeRequest() }
     );
 
     const mcpConfigPath = path.join(process.cwd(), "mcp.json");

@@ -1383,6 +1383,21 @@ Returns structured JSON:
 
 This pattern is used in the context tests where several context files are learned first and then the agent is queried.
 
+## Warm durable runtime
+
+The `plan`, `run-tool`, and `resume` commands automatically reuse one resident agent
+runtime while their Cloud VM container remains warm. The first command loads the runtime;
+later commands avoid loading the full model and tool libraries again. Command output,
+permissions, working directory, environment, and history behavior remain the same.
+
+The resident runtime is tied to the installed package artifact, so replacing the package
+starts a new runtime. Instruction and skill metadata is reused only while its file identity
+is unchanged. Model and tool configuration is evaluated for every command. User messages,
+conversation history, execution state, and credentials are request-local and are cleared
+before another command is accepted.
+
+Interactive `ask` and streaming commands keep their existing direct-process behavior.
+
 ## Runtime timing
 
 Hosted executions set `AUX4_TRACE_ID` and `AUX4_EXECUTION_PHASE` automatically. The agent
@@ -1390,6 +1405,9 @@ then writes compact `aux4.timing` JSON records to stderr for bootstrap, package 
 model inference, result loading, and tool command execution. These records contain only a
 non-secret correlation ID, fixed span names, duration, phase, and status. Prompt text, model
 output, command arguments, URLs, and credentials are never included.
+
+Warm-runtime startup and metadata-discovery records include `cacheHit` and `cold` booleans.
+This distinguishes the first artifact load from later requests without exposing cached data.
 
 ---
 

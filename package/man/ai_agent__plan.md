@@ -18,6 +18,11 @@ Key features:
 - **Same setup as `ask`** — instructions, bio, skills, permissions, model selection, tool allow-list (`--tools`) all apply
 - **Optional new message** — pass a `question` to add a user turn, or omit it to continue from history alone
 
+On a warm Cloud VM, `plan` reuses the resident agent runtime loaded by the first durable
+agent command. Package replacement and changed instruction or skill files invalidate the
+corresponding runtime metadata. The model configuration, user message, history, and
+credentials remain specific to this invocation.
+
 #### Usage
 
 ```bash
