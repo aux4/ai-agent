@@ -62,8 +62,8 @@ export async function dispatchCommand(args) {
   if (command === "run-tools-and-resume") {
     return await runToolsAndResumeExecutor({
       ...commonAgentParams(args),
-      toolCalls: args[24] || "",
-      historySeed: args[25] || ""
+      toolCallsBase64: args[24] || "",
+      historySeedBase64: args[25] || ""
     });
   }
   if (command === "image") return await imageExecutor({ prompt: args[1], image: args[2], size: args[3], quality: args[4], context: args[5], model: JSON.parse(args[6] || "{}"), quantity: parseInt(args[7] || "1") });

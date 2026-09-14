@@ -161,6 +161,11 @@ aux4 ai agent image --prompt "…" --image out.png \
 
 - `searchText` ranks by word overlap; a few plain words work better than a sentence.
 - The head/tail split and the 10KB limit are not configurable yet.
+# 1.3.8
+
+- Keeps the fused command at the existing 25-value bridge width by replacing
+  its raw JSON inputs with the base64-safe fields instead of appending fields.
+
 # 1.3.7
 
 - Adds bounded base64 inputs for fused tool calls and history checkpoints so
