@@ -57,7 +57,11 @@ export async function runToolCalls(params) {
       // a different tool from this normal result envelope.
       content = `Error: ${error?.message || String(error)}`;
     }
-    return { id: call.id, content: stringifyContent(content) };
+    // Carry the tool name alongside id/content so Prompt.injectToolResults can
+    // populate the tool-result `name` via its `tr.name` fallback even if the
+    // history round-trip ever fails to pair it. Correctness must not depend
+    // solely on reconstructing the name from durable history.
+    return { id: call.id, name: call.name, content: stringifyContent(content) };
   }));
 }
 
