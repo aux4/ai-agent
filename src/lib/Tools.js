@@ -663,11 +663,25 @@ function toStrippedForm(command) {
 // the boundary that makes an aux4-only tool safer than a general bash tool.
 const SHELL_CONTROL = /[;&|`\n\r]|\$\(|\$\{|<\(|>|</;
 
+// The control check must catch UNQUOTED separators, not characters that merely appear
+// inside a quoted argument. `sh -c` treats a `;`, `|`, newline, `$(...)`, etc. INSIDE a
+// single- or double-quoted span as ordinary text, not an operator — so an argument like
+// `--content "line one\n\nline two"` (a newline inside quotes, required for KB markdown)
+// is a single safe argument, not a chained command. Mask quoted spans to a neutral
+// placeholder before testing SHELL_CONTROL so only truly unquoted operators trip the
+// guard. Single quotes take no escapes in sh; double quotes honor a backslash escape
+// (so an escaped `\"` does not prematurely close the span). This is a mask, not a full
+// shell lexer — it does not need to model every edge, only to stop mistaking quoted
+// content for a shell operator.
+function maskQuotedSpans(command) {
+  return command.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "_");
+}
+
 function validateAux4Only(fullCommand) {
   if (!/^aux4(\s|$)/.test(fullCommand)) {
     return `Permission denied: executeAux4 runs only aux4 commands, and "${fullCommand}" is not one.`;
   }
-  if (SHELL_CONTROL.test(fullCommand)) {
+  if (SHELL_CONTROL.test(maskQuotedSpans(fullCommand))) {
     return `Permission denied: executeAux4 runs only a single aux4 command. Shell operators (; && || | \` $() redirects) are not allowed — run one aux4 command per call.`;
   }
   return null;

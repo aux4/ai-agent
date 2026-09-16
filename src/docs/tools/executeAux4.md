@@ -33,6 +33,11 @@ pipes, redirects, and command chaining (`;` `&&` `||` `|` `` ` `` `$()` `>`) are
 To post-process output, use the aux4 command's own flags, or read the result and reason
 about it yourself.
 
+These characters are only rejected when they are **unquoted** operators. Inside a quoted
+argument they are ordinary text and are allowed — e.g. a `--content` value may contain
+newlines or `;`/`&&` as part of the text: `aux4 kb update --topic x --content "line one
+line two; still one argument"`.
+
 For large-output handling, timeouts, stdin, and config, call `readReference("executeAux4.md")`.
 
 ## Parameters

@@ -10,7 +10,7 @@ aux4 ai agent run-tool '{"id":"clock-1","name":"currentDateTime","arguments":{}}
 ```
 
 ```expect:partial
-{"id":"clock-1","content":"Local:
+{"id":"clock-1","name":"currentDateTime","content":"Local:
 ```
 
 ## reports an unavailable tool as a result
@@ -22,6 +22,7 @@ aux4 ai agent run-tool '{"id":"missing-1","name":"notInstalled","arguments":{}}'
 ```expect:json
 {
   "id": "missing-1",
+  "name": "notInstalled",
   "content": "Error: tool \"notInstalled\" is not available."
 }
 ```
@@ -33,5 +34,5 @@ aux4 ai agent run-tool '{"id":"invalid-1","name":"readFile","arguments":{}}' --t
 ```
 
 ```expect:partial
-{"id":"invalid-1","content":"Error:
+{"id":"invalid-1","name":"readFile","content":"Error:
 ```
