@@ -5,7 +5,10 @@
 // Convert a glob pattern (with * wildcards) to a RegExp and test it against a string.
 export function matchesPattern(subject, pattern) {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp("^" + escaped.replace(/\*/g, ".*") + "$");
+  // "s" (dotall) so a `*` wildcard matches across newlines — commands/paths can contain
+  // newlines (e.g. an `aux4 kb update --content "line1\n\nline2"`), and without dotall
+  // the pattern would fail to match its own allowed command.
+  const regex = new RegExp("^" + escaped.replace(/\*/g, ".*") + "$", "s");
   return regex.test(subject);
 }
 

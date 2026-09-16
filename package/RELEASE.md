@@ -176,3 +176,7 @@ aux4 ai agent image --prompt "…" --image out.png \
 - Adds `ai agent run-tools-and-resume`, an opt-in durable fast path that executes a complete tool batch and the next planning turn in one warm-runtime request.
 - Accepts the exact first-turn history as `--historySeed`; it seeds only a missing durable checkpoint and never overwrites newer state.
 - Discovers the tool registry once per batch while retaining the existing separate `run-tool` and `resume` commands for long-running or independently suspended tools.
+
+## 1.3.11
+
+- Fix (SFA-152): permission matcher (PatternUtils.matchesPattern) now uses dotall so a `*` wildcard matches across newlines — a multi-line `--content` command (e.g. kb update with a Reviewed marker) was being denied against its own allowed pattern.
