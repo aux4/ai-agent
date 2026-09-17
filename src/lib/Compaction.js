@@ -328,8 +328,10 @@ function extractAssistantText(msg) {
   const content = msg.content;
   let text = "";
 
-  if (content && content.kwargs && content.kwargs.content) {
-    const inner = content.kwargs.content;
+  // Tolerate both the legacy envelope (content.kwargs.content) and the SFA-167
+  // stripped shape (content.content) for assistant_with_tool text.
+  const inner = (content && content.kwargs && content.kwargs.content) || (content && content.content);
+  if (inner) {
     if (typeof inner === "string") {
       text = inner;
     } else if (Array.isArray(inner)) {

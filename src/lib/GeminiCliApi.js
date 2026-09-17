@@ -87,8 +87,11 @@ export class GeminiCliApi {
       } else if (msg.role === "assistant_with_tool") {
         if (currentRole && currentRole !== "model") flush();
         currentRole = "model";
-        const kwargs = msg.content && msg.content.kwargs ? msg.content.kwargs : {};
-        if (kwargs.content) {
+        // Tolerate the legacy envelope (content.kwargs) and the SFA-167 stripped
+        // shape (content.content / content.tool_calls).
+        const content = msg.content || {};
+        const kwargs = content.kwargs || content;
+        if (kwargs.content && typeof kwargs.content === "string") {
           pendingParts.push({ text: kwargs.content });
         }
         for (const tc of kwargs.tool_calls || []) {

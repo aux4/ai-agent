@@ -82,12 +82,15 @@ export const historyExecutor = async options => {
       }
 
       if (message.role === "assistant_with_tool") {
-        if (message.content.kwargs) {
-          if (message.content.kwargs.content) {
-            console.log(message.content.kwargs.content);
+        // Tolerate the legacy envelope (content.kwargs) and the SFA-167 stripped
+        // shape (content.content / content.tool_calls).
+        const toolContent = (message.content && message.content.kwargs) || message.content;
+        if (toolContent) {
+          if (toolContent.content && typeof toolContent.content === "string") {
+            console.log(toolContent.content);
           }
-          if (message.content.kwargs.tool_calls && Array.isArray(message.content.kwargs.tool_calls)) {
-            message.content.kwargs.tool_calls.forEach(toolCall => {
+          if (toolContent.tool_calls && Array.isArray(toolContent.tool_calls)) {
+            toolContent.tool_calls.forEach(toolCall => {
               const params = Object.entries(toolCall.args || {})
                 .map(([key, value]) => {
                   // Truncate very long values for display only

@@ -67,8 +67,11 @@ export class CodexApi {
       } else if (msg.role === "assistant") {
         items.push({ role: "assistant", content: msg.content || "" });
       } else if (msg.role === "assistant_with_tool") {
-        const kwargs = msg.content && msg.content.kwargs ? msg.content.kwargs : {};
-        for (const tc of kwargs.tool_calls || []) {
+        // Tolerate the legacy envelope (content.kwargs.tool_calls) and the
+        // SFA-167 stripped shape (content.tool_calls).
+        const content = msg.content || {};
+        const toolCalls = (content.kwargs && content.kwargs.tool_calls) || content.tool_calls || [];
+        for (const tc of toolCalls) {
           items.push({
             type: "function_call",
             call_id: tc.id,
