@@ -40,10 +40,27 @@ function expandTildePath(filePath) {
   return filePath;
 }
 
+// Hosted agents (e.g. aux4/kb-agent under aux4/agent-manager) persist conversation
+// transcripts under this fixed root -- one JSON file per conversation, with no per-user
+// path segment yet (that per-user rooting is tracked separately). Until it lands, this
+// tree must be unconditionally off-limits to the model's read-capable tools: the blanket
+// /tmp/ allowance below would otherwise let any hosted agent enumerate and read every
+// user's conversation via listFiles/readFile. This denial is intentionally structural --
+// checked before, and independent of, any `permissions` config -- because most ai-agent
+// consumers do not set `permissions` at all, and a policy-only gate would leave them
+// exposed. It has no effect on conversation history persistence itself: saveHistory/
+// history() in Prompt.js write and read the --history file directly via node:fs, never
+// through these tool wrappers, so history still works even when --history points inside
+// this tree. See CSEC-027 / CSEC-028.
+const DENIED_READ_ONLY_PREFIXES = ["/tmp/state/agent-sessions"];
+
 // Helper function to check if path is allowed for read-only access
 function isReadOnlyPathAllowed(filePath, currentDirectory) {
   const aux4ConfigPath = path.join(os.homedir(), ".aux4.config", "packages");
   const tmpDir = os.tmpdir();
+
+  if (DENIED_READ_ONLY_PREFIXES.some(prefix => filePath.startsWith(prefix))) return false;
+
   return filePath.startsWith(currentDirectory)
     || filePath.startsWith(aux4ConfigPath)
     || filePath.startsWith(tmpDir)
