@@ -1,5 +1,15 @@
 # Release notes
 
+## 1.3.13
+
+- Security fix (CSEC-028): `readFile`, `listFiles`, `searchFiles`, and `searchText` now
+  unconditionally deny access to `/tmp/state/agent-sessions` (the hosted-agent conversation
+  transcript root), regardless of the `permissions` configuration. Previously
+  `isReadOnlyPathAllowed` allowed any path under `/tmp/` before any `permissions` check ran,
+  so a hosted agent (e.g. `aux4/kb-agent`) could enumerate and read any user's conversation
+  transcript via its own file tools. Conversation history persistence (`--history`) is
+  unaffected -- it reads/writes its file directly, not through these tools.
+
 ## 1.3.6
 
 - Adds `ai agent run-tools-and-resume`, an opt-in durable fast path that executes a complete tool batch and the next planning turn in one warm-runtime request.
