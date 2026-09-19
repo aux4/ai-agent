@@ -1,5 +1,25 @@
 # Release notes
 
+## 1.3.14
+
+- Durable in-turn checkpointing (SFA-183). Conversation history was already checkpointed to
+  `--history` after every message/tool round; the gap was that those writes land on local
+  disk (Lambda `/tmp`), and `cloud-file-sync` only pushes to S3 *after* the invocation
+  returns. A container killed at the Lambda timeout never published its checkpoint, so a
+  "try again" retry recovered nothing from a long turn even though it had been checkpointed
+  perfectly right up to the kill. When `AUX4_HISTORY_CHECKPOINT_PUT_URL` /
+  `AUX4_HISTORY_CHECKPOINT_GET_URL` are set (normally a short-lived presigned S3 URL minted
+  once per invocation by the caller), every `saveHistory()` now also PUTs the same payload
+  straight to that URL, and `--history` load now GETs it first to seed a fresh container's
+  local `/tmp` before falling back to local/empty. This bypasses `cloud-file-sync` entirely
+  for the transcript path -- a single opaque PUT/GET of one object, no manifest read or
+  written -- so it cannot hit the `cloud-file-sync` torn-manifest defect (SFA-151), and it
+  never contends with `cloud-file-sync`'s own end-of-invocation push over the same key. A
+  warm container that still has local state is unaffected (only a missing local file
+  triggers a pull); a durable push failure is logged and does not fail the turn (the local
+  write already succeeded). No checkpoint URL configured (the default, and the only case for
+  local/CLI use) is a no-op on the hot path -- unchanged behavior, unchanged latency.
+
 ## 1.3.13
 
 - Security fix (CSEC-028): `readFile`, `listFiles`, `searchFiles`, and `searchText` now

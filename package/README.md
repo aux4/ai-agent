@@ -240,6 +240,38 @@ resume --toolResults <results>              # feed results back, decide again
 
 For more details see [aux4 ai agent plan](./commands/ai/agent/plan) and [aux4 ai agent resume](./commands/ai/agent/resume).
 
+### Durable checkpointing across a killed process (SFA-183)
+
+`--history` is already written after every message and tool round, so a turn is checkpointed
+incrementally, not just at the end. On a serverless orchestrator, though, that file normally
+lives on ephemeral local storage that is synced to durable storage only after the invocation
+finishes -- so a process killed mid-turn (for example, a Lambda hitting its timeout) can lose
+every checkpoint written during that turn even though each one was saved correctly.
+
+Set these two environment variables to mirror every checkpoint straight to durable storage as
+it happens, bypassing any local-to-remote sync step entirely:
+
+- `AUX4_HISTORY_CHECKPOINT_PUT_URL` — every `--history` write also does an HTTP `PUT` of the
+  same payload to this URL (normally a short-lived presigned S3 URL minted once per
+  invocation by the caller).
+- `AUX4_HISTORY_CHECKPOINT_GET_URL` — when `--history` points at a file that does not exist
+  locally yet (a fresh container after a retry), it is fetched from this URL first (HTTP
+  `GET`) and used to seed local state before falling back to an empty history.
+
+A warm process that still has the local file is unaffected — only a missing local file
+triggers a pull, so a container that survives a retry keeps using its own state. A durable
+push failure is logged and does not fail the turn: the local write already succeeded, so a
+same-container retry can still recover it. With neither variable set (the default, and the
+only case for local/CLI use), this is a complete no-op on the hot path.
+
+```bash
+export AUX4_HISTORY_CHECKPOINT_PUT_URL="https://bucket.s3.amazonaws.com/session/turn.json?X-Amz-..."
+export AUX4_HISTORY_CHECKPOINT_GET_URL="https://bucket.s3.amazonaws.com/session/turn.json?X-Amz-..."
+aux4 ai agent plan --configFile config.yaml --config agent \
+  --instructions AGENTS.md --history history.json \
+  --tools currentDateTime "What is today's date? Use the currentDateTime tool."
+```
+
 ---
 
 ## Agent Identity & Base Instructions

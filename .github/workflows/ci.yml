@@ -46,6 +46,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Unit tests (unbundled src/, node:test)
+        run: npm run test:unit
+
       - uses: aux4/action@v1
         with:
           command: test

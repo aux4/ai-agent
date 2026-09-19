@@ -32,7 +32,7 @@ export async function resumeExecutor(params) {
     const toolResults = await timed("agent.results-load", () => loadToolResults(params.toolResults));
 
     const { prompt, message, role } = await timed("agent.bootstrap", () => buildAgentPrompt(params));
-    prompt.injectToolResults(toolResults);
+    await prompt.injectToolResults(toolResults);
     const result = await timed("agent.plan", () => prompt.plan(message, params, role));
     console.log(JSON.stringify(result));
     await prompt.close();
