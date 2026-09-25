@@ -6,7 +6,10 @@ The compaction process:
 1. Separates system messages from conversation messages
 2. Summarizes older messages using the specified model
 3. Keeps the most recent messages unchanged
-4. Writes the compacted history back to the file
+4. Copies the full history, as it was, to `<historyFile without .json>.<YYYYMMDDHHMMSS>.json` (UTC) beside it
+5. Writes the compacted history back to the file; the summary message names the copy in `archive` and records `compactedAt` and `compactedCount`
+
+Both history shapes are accepted — a bare message array, or the `{messages, tokenUsage}` object `ask --history` writes — and the file keeps its shape.
 
 The summary preserves key facts, decisions, tool results, and user preferences from the older messages.
 

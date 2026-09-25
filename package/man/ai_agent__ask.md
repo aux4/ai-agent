@@ -59,6 +59,8 @@ Compaction config fields:
 - `keepLastMessages` — recent messages to keep verbatim (default: 6)
 - `model` — optional model config for summarization (defaults to main model)
 
+Compaction keeps the originals: with `--history` set, the full history is written to `<history without .json>.<YYYYMMDDHHMMSS>.json` (UTC) beside the history file before it is compacted, and the summary message carries `compacted: true`, `archive` (that file name), `compactedAt` (ISO time) and `compactedCount` (messages the summary replaces). If the archive cannot be written, the compaction is skipped.
+
 **Agent identity (`--bio`):** Pass a JSON object describing who the agent is. The recognized fields are `name`, `role`, and `description`. When present, they are rendered as a `# Agent Identity` system section (bold `**Name:**` / `**Role:**` / `**Description:**` lines) and injected at the top of the system prompt — above the base instructions and the main instructions — so the agent consistently knows its persona. An empty or omitted `--bio` adds nothing. When stored in a config file under a top-level `bio:` key, aux4 delivers it as JSON automatically.
 
 **Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).

@@ -1,3 +1,24 @@
+# Release 1.3.15
+
+## Features
+
+- **Auto-compaction no longer loses the conversation (AGC-019).** Before the history file is
+  compacted, the full history as it was is written next to it as
+  `<history without .json>.<YYYYMMDDHHMMSS>.json` (UTC). If that archive cannot be written,
+  the compaction is skipped. The summary message gains `archive` (the archive file name),
+  `compactedAt` (ISO time) and `compactedCount` (how many conversation messages it replaces),
+  alongside the existing `compacted: true`. `aux4 ai agent compact` archives the same way and
+  now also accepts the `{messages, tokenUsage}` history shape (the file keeps its shape).
+- Tool rounds that compaction folds into text are marked `condensed: true`, so a chat can tell
+  them from real replies.
+
+All fields are additive: histories written by earlier versions load unchanged.
+
+## Fixes
+
+- Compaction on the Gemini CLI path now actually uses the Gemini CLI API for the summary (the
+  option was never forwarded).
+
 # Release 1.3.12
 
 ## Fixes

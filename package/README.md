@@ -365,6 +365,26 @@ Compaction config fields:
 
 With `--autoCompact false` (the default), behavior is unchanged and nothing is compacted.
 
+**Nothing is lost.** Before the history file is compacted, the full history as it was is written next to it as `<history file without .json>.<YYYYMMDDHHMMSS>.json` (UTC time of the compaction; a second compaction in the same second gets a `-1` suffix). If that archive cannot be written, the compaction is skipped and the history stays whole. The summary message in the compacted history says where the originals went:
+
+```json
+{
+  "role": "assistant",
+  "content": "[Summary of previous conversation]\n\n## Goal\n...",
+  "compacted": true,
+  "archive": "history.20260925143012.json",
+  "compactedAt": "2026-09-25T14:30:12.418Z",
+  "compactedCount": 42,
+  "timestamp": 1790346612418
+}
+```
+
+- `archive` — file name (same folder as the history file) holding the full pre-compaction history
+- `compactedAt` — when the compaction happened (ISO 8601)
+- `compactedCount` — how many conversation messages, counted from the start of the archived history, the summary replaces; the rest of the archive is the tail that was kept
+
+An archive can itself start with an older summary pointing at an older archive, so a reader can walk the whole conversation back. Tool rounds that compaction folds into text in the kept tail are marked `"condensed": true` — they are not something the agent said to the user.
+
 ### History & Memory commands
 
 These commands operate on a saved history JSON file. All three accept `--model` (inline model config JSON) or `--useModel <name>` with a `--models` registry to pick the model that does the summarization.
@@ -406,7 +426,7 @@ Key variables:
 
 #### aux4 ai agent compact
 
-Compact a history file in place: older messages are summarized into a single summary while the most recent `--keepLastMessages` are kept verbatim. This is the out-of-band equivalent of auto-compaction — useful for trimming a saved history before resuming. The compacted history is **written back to the file**; the summary content is printed to stdout and progress is reported to stderr.
+Compact a history file in place: older messages are summarized into a single summary while the most recent `--keepLastMessages` are kept verbatim. The full history is first copied to `<history>.<YYYYMMDDHHMMSS>.json` beside it, and the summary names that file in its `archive` field. This is the out-of-band equivalent of auto-compaction — useful for trimming a saved history before resuming. The compacted history is **written back to the file**; the summary content is printed to stdout and progress is reported to stderr.
 
 ```bash
 aux4 ai agent compact history.json --model '{"type":"openai","config":{"model":"gpt-4o-mini"}}' --keepLastMessages 10

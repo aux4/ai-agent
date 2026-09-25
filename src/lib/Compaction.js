@@ -146,7 +146,8 @@ export async function compactMessages(messages, modelConfig, options = {}) {
 
   const summaryContent = await summarizeMessages(messagesToSummarize, modelConfig, {
     promptFile: options.promptFile,
-    codexApi: options.codexApi
+    codexApi: options.codexApi,
+    geminiCliApi: options.geminiCliApi
   });
 
   // Append file tracking to the structured summary
@@ -156,6 +157,10 @@ export async function compactMessages(messages, modelConfig, options = {}) {
     role: "assistant",
     content: `[Summary of previous conversation]\n\n${summaryContent}${fileTracking}`,
     compacted: true,
+    // How many conversation (non-system) messages, counted from the start of the
+    // pre-compaction history, this summary replaces. A reader holding the archive
+    // uses it to tell the summarized part from the kept tail (AGC-019).
+    compactedCount: messagesToSummarize.length,
     timestamp: Date.now()
   };
 
@@ -296,6 +301,9 @@ function condenseToolMessages(messages) {
       result.push({
         role: "assistant",
         content,
+        // A tool round folded into text by compaction, not something the agent
+        // said to the user — a chat can hide or de-emphasize it (AGC-019).
+        condensed: true,
         timestamp: msg.timestamp
       });
     } else {

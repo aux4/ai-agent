@@ -12,6 +12,7 @@ import { createTools } from "./Tools.js";
 import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
+import { writeArchive, markSummary } from "./CompactionArchive.js";
 import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
 import { GeminiCliApi } from "./GeminiCliApi.js";
@@ -766,22 +767,9 @@ class Prompt {
 
       this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
 
-      if (this.compactionConfig && this.compactionConfig.contextWindow) {
-        const promptTokens = response.response_metadata?.tokenUsage?.promptTokens
-          || response.usage_metadata?.input_tokens || 0;
-        if (shouldCompact(promptTokens, this.compactionConfig)) {
-          const compactionModel = this.compactionConfig.model || this.config;
-          try {
-            this.messages = await compactMessages(this.messages, compactionModel, {
-              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
-              promptFile: this.compactionConfig.promptFile
-            });
-            this.compacted = true;
-          } catch (err) {
-            console.error(`[compact] Warning: ${err.message}`);
-          }
-        }
-      }
+      await this._autoCompact(
+        response.response_metadata?.tokenUsage?.promptTokens || response.usage_metadata?.input_tokens || 0
+      );
 
       await this.saveHistory(true);
 
@@ -848,22 +836,9 @@ class Prompt {
 
       this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
 
-      if (this.compactionConfig && this.compactionConfig.contextWindow) {
-        const promptTokens = result.usage.input || 0;
-        if (shouldCompact(promptTokens, this.compactionConfig)) {
-          const compactionModel = this.compactionConfig.model || this.config;
-          try {
-            this.messages = await compactMessages(this.messages, compactionModel, {
-              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
-              promptFile: this.compactionConfig.promptFile,
-              codexApi: (!this.compactionConfig.model && this.apiType === "codex") ? this.codexApi : null
-            });
-            this.compacted = true;
-          } catch (err) {
-            console.error(`[compact] Warning: ${err.message}`);
-          }
-        }
-      }
+      await this._autoCompact(result.usage.input || 0, {
+        codexApi: (!this.compactionConfig?.model && this.apiType === "codex") ? this.codexApi : null
+      });
 
       await this.saveHistory(true);
       return answer;
@@ -901,22 +876,9 @@ class Prompt {
 
       this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
 
-      if (this.compactionConfig && this.compactionConfig.contextWindow) {
-        const promptTokens = result.usage.input || 0;
-        if (shouldCompact(promptTokens, this.compactionConfig)) {
-          const compactionModel = this.compactionConfig.model || this.config;
-          try {
-            this.messages = await compactMessages(this.messages, compactionModel, {
-              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
-              promptFile: this.compactionConfig.promptFile,
-              geminiCliApi: (!this.compactionConfig.model && this.apiType === "gemini-cli") ? this.geminiCliApi : null
-            });
-            this.compacted = true;
-          } catch (err) {
-            console.error(`[compact] Warning: ${err.message}`);
-          }
-        }
-      }
+      await this._autoCompact(result.usage.input || 0, {
+        geminiCliApi: (!this.compactionConfig?.model && this.apiType === "gemini-cli") ? this.geminiCliApi : null
+      });
 
       await this.saveHistory(true);
       return answer;
@@ -952,6 +914,71 @@ class Prompt {
       this.tokenUsage.cached += cached;
       this.tokenUsage.total += (input + output);
     }
+  }
+
+  // Auto-compaction (AGC-019: without loss). Before the oldest messages are
+  // folded into a summary, the FULL current history is written next to the
+  // history file as <history>.<YYYYMMDDHHMMSS>.json (UTC) and the summary names
+  // it (`archive`, plus `compactedAt` and `compactedCount`). If the archive
+  // cannot be written the compaction is skipped: a long history beats a lossy one.
+  // Without --history there is nothing to archive and nothing to lose on disk, so
+  // compaction runs as before.
+  async _autoCompact(promptTokens, extra = {}) {
+    if (!this.compactionConfig || !this.compactionConfig.contextWindow) return;
+    if (!shouldCompact(promptTokens, this.compactionConfig)) return;
+    const compactionModel = this.compactionConfig.model || this.config;
+    let archive = null;
+    if (this.historyFile) {
+      try {
+        const data = this._serializeHistory();
+        if (data) archive = writeArchive(this.historyFile, data);
+      } catch (err) {
+        console.error(`[compact] Skipped: could not archive the history before compacting (${err.message})`);
+        return;
+      }
+    }
+    try {
+      const previous = this.messages;
+      const compacted = await compactMessages(previous, compactionModel, {
+        keepLastMessages: this.compactionConfig.keepLastMessages || 6,
+        promptFile: this.compactionConfig.promptFile,
+        ...extra
+      });
+      const summary = markSummary(compacted, previous, { archive: archive ? archive.name : null });
+      if (!summary && archive) {
+        // Nothing was summarized (only tool rounds condensed): no message points at
+        // the archive, so do not leave an orphan behind.
+        fs.rmSync(archive.file, { force: true });
+      }
+      this.messages = compacted;
+      this.compacted = true;
+    } catch (err) {
+      if (archive) fs.rmSync(archive.file, { force: true });
+      console.error(`[compact] Warning: ${err.message}`);
+    }
+  }
+
+  // The exact payload saveHistory writes: {messages, tokenUsage}, system prompts
+  // dropped, tool entries trimmed to their persisted fields. Null when empty.
+  _serializeHistory() {
+    const simplifiedMessages = this.messages
+      .filter(message => message.role !== "system" || message.timestamp)
+      .map(message => {
+        if (message.role === "tool") {
+          const entry = {
+            role: "tool",
+            content: message.content,
+            tool_call_id: message.tool_call_id,
+            name: message.name,
+            timestamp: message.timestamp
+          };
+          if (message.policy) entry.policy = message.policy;
+          return entry;
+        }
+        return message;
+      });
+    if (simplifiedMessages.length === 0) return null;
+    return JSON.stringify({ messages: simplifiedMessages, tokenUsage: this.tokenUsage });
   }
 
   async saveHistory(sync = false) {

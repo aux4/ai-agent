@@ -33,7 +33,7 @@ export async function load(url, context, nextLoad) {
   if (
     result.format === "module" &&
     url.startsWith("file://") &&
-    url.includes("/ai-agent-CSEC028/src/") &&
+    url.includes("/src/") && !url.includes("/node_modules/") &&
     (source.includes("__dirname") || source.includes("__filename"))
   ) {
     const shim =

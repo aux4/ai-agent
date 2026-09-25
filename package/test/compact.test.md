@@ -55,9 +55,25 @@ This makes a live LLM call. It is skipped when no LLM credentials are present
 ```
 
 ```execute
-if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "compacted:true"; else cp compact-history.json compact-test.json && aux4 ai agent compact compact-test.json --config --keepLastMessages 4 && MESSAGES=$(node -e "const h=require('./compact-test.json'); console.log(h.length)") && COMPACTED=$(node -e "const h=require('./compact-test.json'); console.log(h.some(m => m.compacted))") && echo "messages:$MESSAGES" && echo "compacted:$COMPACTED" && rm -f compact-test.json; fi
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "compacted:true"; else cp compact-history.json compact-test.json && aux4 ai agent compact compact-test.json --config --keepLastMessages 4 && MESSAGES=$(node -e "const h=require('./compact-test.json'); console.log(h.length)") && COMPACTED=$(node -e "const h=require('./compact-test.json'); console.log(h.some(m => m.compacted))") && echo "messages:$MESSAGES" && echo "compacted:$COMPACTED" && rm -f compact-test.json compact-test.*.json; fi
 ```
 
 ```expect:partial
 compacted:true
+```
+
+### should archive the full history before compacting and name it on the summary
+
+Also a live LLM call, skipped the same way without credentials.
+
+```timeout
+120000
+```
+
+```execute
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "archived:true"; else rm -rf archive-test && mkdir archive-test && cp compact-history.json archive-test/conv.json && aux4 ai agent compact archive-test/conv.json --config --keepLastMessages 4 && ARCHIVE=$(node -e "const h=require('./archive-test/conv.json'); console.log(h.find(m => m.compacted).archive)") && node -e "const a=require('./archive-test/$ARCHIVE'); console.log('archived:' + (a.length === 10))" && rm -rf archive-test; fi
+```
+
+```expect:partial
+archived:true
 ```

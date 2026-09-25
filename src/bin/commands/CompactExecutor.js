@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "fs";
 import { compactMessages } from "../../lib/Compaction.js";
+import { writeArchive, markSummary } from "../../lib/CompactionArchive.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
 import "colors";
 
@@ -23,7 +24,11 @@ export async function compactExecutor(params) {
 
   try {
     const historyContent = readFileSync(historyFile, "utf8");
-    const messages = JSON.parse(historyContent);
+    const parsed = JSON.parse(historyContent);
+    // Both history shapes: the legacy bare array, and the {messages, tokenUsage}
+    // envelope `ask --history` writes. The file keeps the shape it had.
+    const envelope = parsed && !Array.isArray(parsed) && Array.isArray(parsed.messages) ? parsed : null;
+    const messages = envelope ? envelope.messages : parsed;
 
     if (!Array.isArray(messages)) {
       console.error("Error: Invalid history file format - expected an array".red);
@@ -35,8 +40,18 @@ export async function compactExecutor(params) {
 
     const compacted = await compactMessages(messages, model, { keepLastMessages });
 
+    // Keep the originals: the full history as it was goes to
+    // <history>.<YYYYMMDDHHMMSS>.json before the file is rewritten, and the
+    // summary names it. Only when a summary was actually produced.
+    const previous = new Set(messages);
+    if (compacted.some(message => message && message.compacted === true && !previous.has(message))) {
+      const archive = writeArchive(historyFile, historyContent);
+      markSummary(compacted, messages, { archive: archive.name });
+      console.error(`Archived the full history to ${archive.name}`);
+    }
+
     const compactedCount = compacted.length;
-    writeFileSync(historyFile, JSON.stringify(compacted));
+    writeFileSync(historyFile, JSON.stringify(envelope ? { ...envelope, messages: compacted } : compacted));
 
     console.error(`Compacted: ${originalCount} → ${compactedCount} messages`);
 
