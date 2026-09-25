@@ -129,13 +129,25 @@ export async function compactMessages(messages, modelConfig, options = {}) {
   const systemMessages = messages.filter(m => m.role === "system");
   const conversationMessages = messages.filter(m => m.role !== "system");
 
-  if (conversationMessages.length <= keepLast + 1) {
+  // Never summarize the latest user message: compaction runs right after an answer,
+  // and folding the question that answer replies to into a summary leaves the kept tail
+  // starting mid-turn (a bare tool result, then the answer) — the next turn, and any
+  // chat rendering the history, loses what was asked. The kept tail therefore starts
+  // at the latest user message when keepLast alone would cut into it.
+  let splitAt = conversationMessages.length - keepLast;
+  let lastUser = -1;
+  for (let i = conversationMessages.length - 1; i >= 0; i--) {
+    if (conversationMessages[i].role === "user") { lastUser = i; break; }
+  }
+  if (lastUser >= 0 && lastUser < splitAt) splitAt = lastUser;
+
+  if (conversationMessages.length <= keepLast + 1 || splitAt <= 0) {
     const condensed = condenseToolMessages(conversationMessages);
     return [...systemMessages, ...condensed];
   }
 
-  const messagesToSummarize = conversationMessages.slice(0, conversationMessages.length - keepLast);
-  const keptMessages = conversationMessages.slice(conversationMessages.length - keepLast);
+  const messagesToSummarize = conversationMessages.slice(0, splitAt);
+  const keptMessages = conversationMessages.slice(splitAt);
 
   // Extract file operations from messages being summarized
   const fileOps = extractFileOps(messagesToSummarize);

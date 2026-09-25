@@ -360,7 +360,7 @@ Compaction config fields:
 |-------|---------|-------------|
 | `contextWindow` | *(required)* | Model's context window size in tokens. Auto-compaction is inactive unless this is set. |
 | `maxContextPercent` | `85` | Trigger threshold as a percentage of `contextWindow`. |
-| `keepLastMessages` | `6` | Number of recent messages kept verbatim. |
+| `keepLastMessages` | `6` | Number of recent messages kept verbatim. The latest user message is always kept, with everything after it, even when that is more. |
 | `model` | main model | Optional model config used for the summarization step. |
 
 With `--autoCompact false` (the default), behavior is unchanged and nothing is compacted.

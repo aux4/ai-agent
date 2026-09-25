@@ -1,3 +1,13 @@
+# Release 1.3.16
+
+## Fixes
+
+- **Compaction keeps the question it just answered (AGC-019).** Auto-compaction runs right
+  after an answer, and with a small `keepLastMessages` (or a tool-heavy turn) the kept tail
+  could start mid-turn — a bare tool result and the answer — with the question folded into
+  the summary. The kept tail now always starts at the latest user message, even if that
+  keeps more than `keepLastMessages`.
+
 # Release 1.3.15
 
 ## Features

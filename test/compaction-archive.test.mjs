@@ -144,3 +144,20 @@ test("condensed tool rounds are flagged so a chat can tell them from real replie
   assert.equal(condensed.role, "assistant");
   assert.match(condensed.content, /\[Tool calls\]/);
 });
+
+test("compaction never summarizes the latest user message (the question the answer replies to)", async () => {
+  const messages = [
+    ...conversation(3),
+    { role: "user", content: "look it up", timestamp: 2000 },
+    { role: "assistant_with_tool", content: { content: "", tool_calls: [{ id: "t1", name: "executeAux4", args: { command: "aux4 --help" } }] }, timestamp: 2001 },
+    { role: "tool", content: "help text", tool_call_id: "t1", name: "executeAux4", timestamp: 2002 },
+    { role: "assistant", content: "done", timestamp: 2003 }
+  ];
+  const compacted = await compactMessages(messages, {}, { keepLastMessages: 2, codexApi: fakeSummarizer });
+  const summary = compacted.find(message => message.compacted);
+  assert.equal(summary.compactedCount, 6);
+  const tail = compacted.filter(message => !message.compacted);
+  assert.equal(tail[0].role, "user");
+  assert.equal(tail[0].content, "look it up");
+  assert.equal(tail.at(-1).content, "done");
+});

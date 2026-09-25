@@ -56,7 +56,7 @@ Auto-compaction requires both `--autoCompact true` and a `compaction` config wit
 Compaction config fields:
 - `contextWindow` — model's context window size in tokens (required)
 - `maxContextPercent` — trigger threshold as percentage (default: 85)
-- `keepLastMessages` — recent messages to keep verbatim (default: 6)
+- `keepLastMessages` — recent messages to keep verbatim (default: 6); the latest user message and everything after it are always kept
 - `model` — optional model config for summarization (defaults to main model)
 
 Compaction keeps the originals: with `--history` set, the full history is written to `<history without .json>.<YYYYMMDDHHMMSS>.json` (UTC) beside the history file before it is compacted, and the summary message carries `compacted: true`, `archive` (that file name), `compactedAt` (ISO time) and `compactedCount` (messages the summary replaces). If the archive cannot be written, the compaction is skipped.
