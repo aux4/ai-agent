@@ -1,3 +1,15 @@
+# Release 1.3.17
+
+## Changes
+
+- **Per-command `executeAux4` timeouts (CBR-048).** `permissions.timeouts` (or the host's
+  `AUX4_AGENT_TOOL_TIMEOUTS` JSON env) maps command patterns to seconds, e.g.
+  `{"aux4 cloud browser *": 280}`; a match raises the 60s default or a shorter timeout the
+  model asked for. A longer timeout or `0` from the model is kept.
+- **No `jobs run` advice where aux4/jobs is not installed.** A timed-out command is only handed
+  to (or pointed at) `aux4 jobs` when the package is installed; otherwise the message asks for
+  one retry with a longer timeout. `AUX4_AGENT_JOBS_AVAILABLE=true|false` overrides the check.
+
 # Release 1.3.16
 
 ## Fixes

@@ -332,6 +332,62 @@ export const createDirectoryTool = tool(
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
 
+// Per-command timeouts (seconds), by glob pattern over the command — e.g. a remote
+// browser task that legitimately runs for minutes: {"aux4 cloud browser *": 280}.
+// Two sources, merged (the permissions config wins on the same pattern):
+//   - env AUX4_AGENT_TOOL_TIMEOUTS: a JSON object, set by the host (agent-vm);
+//   - permissions.timeouts in the agent's permissions config.
+// A matching pattern raises the timeout when the model asked for less (or nothing);
+// an explicit 0 (no timeout) or a longer one from the model is kept.
+export function configuredTimeouts(permissions, env = process.env) {
+  const merged = {};
+  const add = (value) => {
+    let obj = value;
+    if (typeof obj === "string") {
+      try { obj = JSON.parse(obj); } catch { obj = null; }
+    }
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return;
+    for (const [pattern, seconds] of Object.entries(obj)) {
+      const n = Number(seconds);
+      if (pattern && Number.isFinite(n) && n > 0) merged[pattern] = n;
+    }
+  };
+  add(env.AUX4_AGENT_TOOL_TIMEOUTS);
+  add(permissions && permissions.timeouts);
+  return merged;
+}
+
+export function resolveTimeout(command, requested, timeouts = {}) {
+  const full = toFullForm(command);
+  const stripped = toStrippedForm(command);
+  let configured = 0;
+  for (const [pattern, seconds] of Object.entries(timeouts || {})) {
+    const p = String(pattern).trim();
+    if (matchesPatternUtil(full, p) || matchesPatternUtil(stripped, p) || matchesPatternUtil(full, `aux4 ${p}`)) {
+      configured = Math.max(configured, seconds);
+    }
+  }
+  if (requested === 0) return 0;
+  if (!configured) return requested;
+  if (typeof requested === "number" && requested > configured) return requested;
+  return configured;
+}
+
+let jobsAvailableCache;
+// Whether `aux4 jobs` is installed here (checked once, only on the timeout path).
+export function jobsAvailable() {
+  if (process.env.AUX4_AGENT_JOBS_AVAILABLE === "true") return true;
+  if (process.env.AUX4_AGENT_JOBS_AVAILABLE === "false") return false;
+  if (jobsAvailableCache !== undefined) return jobsAvailableCache;
+  try {
+    const res = spawnSync("aux4", ["jobs", "--help"], { encoding: "utf-8", timeout: 5000 });
+    jobsAvailableCache = res.status === 0 && !/command not found/i.test(`${res.stdout}${res.stderr}`);
+  } catch {
+    jobsAvailableCache = false;
+  }
+  return jobsAvailableCache;
+}
+
 function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
@@ -378,23 +434,25 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
 
         const partialOutput = readOutputFile(stdoutPath, 2000);
 
-        // Try to attach to aux4 jobs
-        try {
-          const attachResult = spawnSync("aux4", [
-            "jobs", "attach", String(child.pid), cmd,
-            "--stdout", stdoutPath, "--stderr", stderrPath
-          ], { encoding: "utf-8", timeout: 5000 });
+        // Try to attach to aux4 jobs (only where aux4/jobs is installed)
+        if (jobsAvailable()) {
+          try {
+            const attachResult = spawnSync("aux4", [
+              "jobs", "attach", String(child.pid), cmd,
+              "--stdout", stdoutPath, "--stderr", stderrPath
+            ], { encoding: "utf-8", timeout: 5000 });
 
-          if (attachResult.status === 0 && attachResult.stdout) {
-            const job = JSON.parse(attachResult.stdout.trim());
-            const error = new Error("timeout_attached");
-            error.timedOut = true;
-            error.attached = true;
-            error.jobId = job.id;
-            error.partialOutput = partialOutput;
-            return reject(error);
-          }
-        } catch {}
+            if (attachResult.status === 0 && attachResult.stdout) {
+              const job = JSON.parse(attachResult.stdout.trim());
+              const error = new Error("timeout_attached");
+              error.timedOut = true;
+              error.attached = true;
+              error.jobId = job.id;
+              error.partialOutput = partialOutput;
+              return reject(error);
+            }
+          } catch {}
+        }
 
         // aux4 jobs not available — kill the process
         try { process.kill(child.pid, "SIGTERM"); } catch {}
@@ -510,12 +568,24 @@ function formatTimeoutMessage(command, timeout, error) {
     return lines.join("\n");
   }
 
-  // Process was killed (aux4 jobs not available)
+  // Process was killed (it could not be handed to aux4 jobs)
   const lines = [
     `TIMEOUT: "aux4 ${command}" was killed after ${timeoutSec} seconds.`,
   ];
   if (error.partialOutput) {
     lines.push(``, `Partial output captured before kill:`, error.partialOutput);
+  }
+  if (!jobsAvailable()) {
+    // Suggesting `jobs run` where aux4/jobs is not installed only produces a second
+    // failure ("Command not found: jobs"). Offer the retry that can work here.
+    const longer = Math.max(timeoutSec * 2, 120);
+    lines.push(
+      ``,
+      `Background jobs are not available here. Retry the same command once with a longer timeout:`,
+      `  executeAux4({"command": "aux4 ${command}", "timeout": ${longer}})`,
+      `If it times out again, tell the user it did not finish and what you tried; do not retry it again.`,
+    );
+    return lines.join("\n");
   }
   lines.push(
     ``,
@@ -544,11 +614,12 @@ export const executeAux4CliTool = tool(
     }
 
     try {
-      const result = await executeWithTimeout(fullCommand, { stdin, timeout, cwd });
+      const effective = resolveTimeout(fullCommand, timeout, configuredTimeouts(null));
+      const result = await executeWithTimeout(fullCommand, { stdin, timeout: effective, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
-        return formatTimeoutMessage(command, timeout, error);
+        return formatTimeoutMessage(command, resolveTimeout(fullCommand, timeout, configuredTimeouts(null)), error);
       }
       return `Error executing command: ${error.message}`;
     }
@@ -559,7 +630,7 @@ export const executeAux4CliTool = tool(
     schema: z.object({
       command: z.string(),
       stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60 (some commands, e.g. remote browser tasks, have a longer configured timeout that applies automatically). Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
       cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
     })
   }
@@ -771,11 +842,12 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const result = await executeWithTimeout(fullCommand, { stdin, timeout, cwd });
+      const effective = resolveTimeout(fullCommand, timeout, configuredTimeouts(permissions));
+      const result = await executeWithTimeout(fullCommand, { stdin, timeout: effective, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
-        return formatTimeoutMessage(command, timeout, error);
+        return formatTimeoutMessage(command, resolveTimeout(fullCommand, timeout, configuredTimeouts(permissions)), error);
       }
       return `Error executing command: ${error.message}`;
     }
@@ -786,7 +858,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
     schema: z.object({
       command: z.string(),
       stdin: z.string().optional().describe("Optional data to pass as stdin to the command"),
-      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60. Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
+      timeout: z.number().optional().describe("Timeout in seconds. Defaults to 60 (some commands, e.g. remote browser tasks, have a longer configured timeout that applies automatically). Set to 0 to disable timeout. If the command exceeds this limit, the process is transferred to a background job via aux4 jobs attach (if available) or killed."),
       cwd: z.string().optional().describe("Working directory for the command. Defaults to the current directory.")
     })
   }

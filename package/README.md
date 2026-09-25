@@ -829,6 +829,23 @@ The agent comes with a set of built-in tools that the LLM can call during execut
 | `readReference` | List or read reference documents from the references directory |
 | `readSkill` | List or read skill definitions from the skills directory |
 
+### executeAux4 timeouts
+
+`executeAux4` stops a command after 60 seconds unless the model asks for another timeout. Commands that legitimately run for minutes get a longer timeout by pattern, applied automatically:
+
+```yaml
+config:
+  permissions:
+    allow:
+      - "*"
+    timeouts:
+      "aux4 cloud browser *": 280    # seconds
+```
+
+The same map can come from the host as JSON in the `AUX4_AGENT_TOOL_TIMEOUTS` environment variable (the permissions config wins on the same pattern). A configured timeout raises a shorter one the model asked for; a longer one, or `0` (no timeout), is kept.
+
+When a command times out it is handed to a background job if `aux4/jobs` is installed (the model gets the job id to check on it). Without `aux4/jobs` the command is stopped and the model is told to retry once with a longer timeout — never to use `jobs`.
+
 ### askUser
 
 The `askUser` tool lets the agent prompt the user interactively when it needs clarification, a preference, or a decision before proceeding. The question is displayed on stderr and the user types their response on stdin.
