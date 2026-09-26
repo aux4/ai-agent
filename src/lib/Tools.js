@@ -28,6 +28,7 @@ import searchTextDesc from "../docs/tools/searchText.md?raw";
 import aux4SkillDesc from "../docs/tools/aux4Skill.md?raw";
 import { listSkills, listInstalledSkills } from "./Skills.js";
 import { extractChildTimings } from "./Timing.js";
+import { buildAux4Argv, CommandParseError } from "./CommandArgs.js";
 
 // Array to track files and directories created by the agent
 const createdPaths = [];
@@ -388,7 +389,9 @@ export function jobsAvailable() {
   return jobsAvailableCache;
 }
 
-function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
+// `cmd` is the display form (used for the jobs-attach label); `argv` is what actually runs:
+// `aux4` is spawned directly with it — no shell, so nothing in it is ever interpreted.
+function executeWithTimeout(cmd, { argv, stdin, timeout, cwd } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
   const tmpDir = os.tmpdir();
@@ -413,7 +416,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
     };
     if (cwd) spawnOptions.cwd = cwd;
 
-    const child = spawn("sh", ["-c", cmd], spawnOptions);
+    const child = spawn("aux4", argv, spawnOptions);
 
     if (stdin) {
       child.stdin.write(stdin);
@@ -603,19 +606,19 @@ export const executeAux4CliTool = tool(
     const command = toStrippedForm(rawCommand);
     const fullCommand = toFullForm(rawCommand);
 
-    const invalid = validateAux4Only(fullCommand);
-    if (invalid) return invalid;
+    const parsed = parseAux4Command(fullCommand);
+    if (parsed.error) return parsed.error;
 
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
-      if (matchesPattern(command, pattern) || matchesPattern(fullCommand, pattern)) {
+      if (commandSubjects(command, fullCommand, parsed.argv).some((s) => matchesPattern(s, pattern))) {
         return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
       }
     }
 
     try {
       const effective = resolveTimeout(fullCommand, timeout, configuredTimeouts(null));
-      const result = await executeWithTimeout(fullCommand, { stdin, timeout: effective, cwd });
+      const result = await executeWithTimeout(fullCommand, { argv: parsed.argv, stdin, timeout: effective, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -745,34 +748,49 @@ function toStrippedForm(command) {
   return trimmed.replace(/^aux4(\s+|$)/, "");
 }
 
-// executeAux4 runs ONLY aux4 commands — never arbitrary CLI. Commands are executed via
-// `sh -c`, so shell control operators would let a caller chain any binary
-// (`aux4 version; rm -rf ~`) or substitute one (`aux4 $(curl evil)`). Reject them: this is
-// the boundary that makes an aux4-only tool safer than a general bash tool.
-const SHELL_CONTROL = /[;&|`\n\r]|\$\(|\$\{|<\(|>|</;
-
-// The control check must catch UNQUOTED separators, not characters that merely appear
-// inside a quoted argument. `sh -c` treats a `;`, `|`, newline, `$(...)`, etc. INSIDE a
-// single- or double-quoted span as ordinary text, not an operator — so an argument like
-// `--content "line one\n\nline two"` (a newline inside quotes, required for KB markdown)
-// is a single safe argument, not a chained command. Mask quoted spans to a neutral
-// placeholder before testing SHELL_CONTROL so only truly unquoted operators trip the
-// guard. Single quotes take no escapes in sh; double quotes honor a backslash escape
-// (so an escaped `\"` does not prematurely close the span). This is a mask, not a full
-// shell lexer — it does not need to model every edge, only to stop mistaking quoted
-// content for a shell operator.
-function maskQuotedSpans(command) {
-  return command.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "_");
+// executeAux4 runs ONLY aux4 commands — never arbitrary CLI. It does not use a shell: the
+// command string is parsed into argv with POSIX quoting rules (see CommandArgs.js) and
+// `aux4` is spawned directly. Shell operators (`;` `&&` `|` `>` backticks `$(...)`, newlines)
+// therefore have no meaning — `aux4 x; rm -rf /` runs `aux4` with the literal args
+// `x;`, `rm`, `-rf`, `/`. This replaces the old operator-rejecting guard, which had to
+// refuse legitimate arguments like a URL containing `&`.
+function parseAux4Command(fullCommand) {
+  if (!/^aux4(\s|$)/.test(fullCommand)) {
+    return { error: `Permission denied: executeAux4 runs only aux4 commands, and "${fullCommand}" is not one.` };
+  }
+  try {
+    return { argv: buildAux4Argv(fullCommand) };
+  } catch (e) {
+    if (e instanceof CommandParseError) {
+      return { error: `Invalid command: ${e.message}. Quote arguments that contain spaces with matching "..." or '...' quotes.` };
+    }
+    throw e;
+  }
 }
 
-function validateAux4Only(fullCommand) {
-  if (!/^aux4(\s|$)/.test(fullCommand)) {
-    return `Permission denied: executeAux4 runs only aux4 commands, and "${fullCommand}" is not one.`;
-  }
-  if (SHELL_CONTROL.test(maskQuotedSpans(fullCommand))) {
-    return `Permission denied: executeAux4 runs only a single aux4 command. Shell operators (; && || | \` $() redirects) are not allowed — run one aux4 command per call.`;
-  }
-  return null;
+// The subjects permission/deny patterns are matched against: the command as written
+// (stripped and full form, exactly as before) plus the normalized form of what actually
+// runs — the parsed argv joined with single spaces. The normalized form closes quoting
+// tricks (`'kb' delete` is `kb delete` once parsed) without breaking patterns written
+// against the raw string.
+function commandSubjects(command, fullCommand, argv) {
+  const normalized = argv.join(" ");
+  return [...new Set([command, fullCommand, normalized, normalized ? `aux4 ${normalized}` : "aux4"])];
+}
+
+// deny if ANY subject is denied; otherwise ask if any asks; otherwise allow if any allows.
+// (Previously one form matching `allow: ["*"]` could override the other form's deny.)
+function decideCommand(subjects, permissions) {
+  const decisions = subjects.map((s) => checkPermission(s, permissions));
+  const lists = permissions || {};
+  const explicitlyDenied = subjects.some((s) => (lists.deny || []).some((p) => {
+    const parsed = parsePattern(p);
+    return parsed.type === "command" && matchesPattern(s, parsed.pattern);
+  }));
+  if (explicitlyDenied) return "deny";
+  if (decisions.includes("ask")) return "ask";
+  if (decisions.includes("allow")) return "allow";
+  return "deny";
 }
 
 export const createExecuteAux4Tool = (permissions) => tool(
@@ -783,30 +801,22 @@ export const createExecuteAux4Tool = (permissions) => tool(
     const command = toStrippedForm(rawCommand);
     const fullCommand = toFullForm(rawCommand);
 
-    const invalid = validateAux4Only(fullCommand);
-    if (invalid) return invalid;
+    const parsed = parseAux4Command(fullCommand);
+    if (parsed.error) return parsed.error;
+    const subjects = commandSubjects(command, fullCommand, parsed.argv);
 
-    // Check system-level deny first (cannot be overridden). Match BOTH forms so a deny
-    // rule written either way still blocks.
+    // Check system-level deny first (cannot be overridden). Match every form (as written,
+    // and as parsed) so a deny rule written either way still blocks.
     for (const pattern of SYSTEM_DENY) {
-      if (matchesPattern(command, pattern) || matchesPattern(fullCommand, pattern)) {
+      if (subjects.some((s) => matchesPattern(s, pattern))) {
         return `Permission denied: command "${command}" is blocked by system security policy. Direct secret access is not allowed. Instead, declare a variable with the secret:// notation in your command's .aux4 definition, and aux4 will resolve it automatically at runtime.\n\nFormat: secret://<provider>/<vault>/<item>/<field>\nOTP:    secret://<provider>/<vault>/<item>/otp\n\nExample variable in .aux4:\n  { "name": "apiKey", "default": "secret://1password/dev/my-api/credential" }\n  { "name": "totpCode", "default": "secret://1password/dev/my-api/otp" }\n\nThe secret is resolved securely and injected into the variable — never call secret get directly.`;
       }
     }
 
     // Permission patterns may be written in either form (stripped, as agents configured
-    // them before; or full, matching what actually runs). Deny wins if EITHER form is
-    // denied; allow needs only one form to match, so existing configs keep working.
-    const strippedDecision = checkPermission(command, permissions);
-    const fullDecision = checkPermission(fullCommand, permissions);
-    const decision =
-      strippedDecision === "deny" && fullDecision === "deny"
-        ? "deny"
-        : strippedDecision === "allow" || fullDecision === "allow"
-          ? "allow"
-          : strippedDecision === "ask" || fullDecision === "ask"
-            ? "ask"
-            : "deny";
+    // them before; or full, matching what actually runs). Deny wins if ANY form is denied;
+    // allow needs only one form to match, so existing configs keep working.
+    const decision = decideCommand(subjects, permissions);
 
     if (decision === "deny") {
       return `Permission denied: command "${fullCommand}" is not allowed by the permissions configuration.${allowedHint(permissions)}`;
@@ -843,7 +853,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
 
     try {
       const effective = resolveTimeout(fullCommand, timeout, configuredTimeouts(permissions));
-      const result = await executeWithTimeout(fullCommand, { stdin, timeout: effective, cwd });
+      const result = await executeWithTimeout(fullCommand, { argv: parsed.argv, stdin, timeout: effective, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {

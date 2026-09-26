@@ -28,15 +28,16 @@ Commands are grouped into profiles, so explore top-down:
 
 ## Limits
 
-This tool runs **only aux4 commands** — one per call. It is not a shell: other programs,
-pipes, redirects, and command chaining (`;` `&&` `||` `|` `` ` `` `$()` `>`) are rejected.
-To post-process output, use the aux4 command's own flags, or read the result and reason
-about it yourself.
+This tool runs **only aux4 commands** — one per call. It is **not a shell**: the command is
+split into arguments with normal quoting rules and `aux4` is run directly. Nothing is
+expanded or interpreted — `;` `&&` `|` `>` `` ` `` `$()` `$VAR` `*` are just characters in an
+argument. You cannot chain commands, pipe, or redirect; to post-process output, use the aux4
+command's own flags, or read the result and reason about it yourself.
 
-These characters are only rejected when they are **unquoted** operators. Inside a quoted
-argument they are ordinary text and are allowed — e.g. a `--content` value may contain
-newlines or `;`/`&&` as part of the text: `aux4 kb update --topic x --content "line one
-line two; still one argument"`.
+Quote an argument that contains spaces (`"..."` or `'...'`). Characters like `&`, `?`, `#`
+need no quoting — e.g. `aux4 browser read --url https://example.com/search?q=a&page=2`, or
+a multi-line `--content "line one
+line two"`.
 
 For large-output handling, timeouts, stdin, and config, call `readReference("executeAux4.md")`.
 

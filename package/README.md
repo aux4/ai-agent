@@ -829,6 +829,20 @@ The agent comes with a set of built-in tools that the LLM can call during execut
 | `readReference` | List or read reference documents from the references directory |
 | `readSkill` | List or read skill definitions from the skills directory |
 
+### executeAux4 arguments
+
+`executeAux4` runs `aux4` directly — there is no shell. The command string is split into
+arguments with the usual quoting rules (`"..."`, `'...'`, backslash escapes) and nothing is
+expanded or interpreted: `;`, `&&`, `|`, `>`, backticks, `$(...)`, `$VAR` and `*` are ordinary
+characters of an argument. A URL such as
+`aux4 browser read --url https://example.com/search?q=a&page=2` needs no quoting, and a
+command like `aux4 kb list; rm -rf /` only ever runs `aux4` with the literal arguments
+`kb`, `list;`, `rm`, `-rf`, `/`.
+
+Permission patterns are matched against the command as written and against its parsed
+form (arguments joined by single spaces), so quoting a word cannot slip past a deny rule. A
+deny rule always wins over a matching allow rule.
+
 ### executeAux4 timeouts
 
 `executeAux4` stops a command after 60 seconds unless the model asks for another timeout. Commands that legitimately run for minutes get a longer timeout by pattern, applied automatically:

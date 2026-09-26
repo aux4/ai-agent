@@ -1,3 +1,23 @@
+# Release 1.3.18
+
+## Changes
+
+- **`executeAux4` no longer uses a shell (CBR-054).** The command string is parsed into
+  arguments (POSIX quoting: single/double quotes, backslash escapes) and `aux4` is spawned
+  directly. No expansion of any kind (`$VAR`, `$(...)`, backticks, globs, `~`). Shell
+  operators are plain argument text, so the operator-rejection guard is gone — a URL with
+  `&` (e.g. a USPS ZIP lookup URL) now runs instead of being refused, and `aux4 x; rm -rf /`
+  runs only `aux4` with literal arguments. An unterminated quote returns
+  `Invalid command: ...` without running anything. Inside double quotes, `$VAR` is no longer
+  expanded (it was, under `sh -c`).
+
+## Fixes
+
+- **Deny rules win.** A command denied in one form (e.g. `hello`) is no longer allowed just
+  because the other form (`aux4 hello`) matched `allow: ["*"]`. Permission and system-deny
+  patterns are also matched against the parsed command, so `aux4 'secret' get` is blocked
+  like `aux4 secret get`.
+
 # Release 1.3.17
 
 ## Changes

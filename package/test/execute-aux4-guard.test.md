@@ -1,8 +1,12 @@
 # executeAux4 safety guards
 
-`executeAux4` runs **only aux4 commands**, one per call. It is not a shell: chaining,
-pipes, redirects and command substitution must be rejected before anything executes.
-These tests pin that boundary.
+`executeAux4` runs **only aux4 commands**, one per call, and it does **not** use a shell:
+the command string is split into arguments with POSIX quoting rules (single quotes,
+double quotes, backslash escapes) and `aux4` is spawned directly with that argv. Shell
+operators (`;` `&&` `|` `>` backticks `$(...)`, newlines) have no meaning — they arrive as
+literal argument text and nothing else ever runs. These tests drive the tool
+deterministically through `run-tool` (no LLM). Single quotes inside the JSON tool call are
+written as `\u0027` so the outer shell quoting of the test stays simple.
 
 ```file:.aux4
 {
@@ -18,6 +22,28 @@ These tests pin that boundary.
           "help": {
             "text": "Print a greeting"
           }
+        },
+        {
+          "name": "show",
+          "execute": [
+            "log:url=${url}",
+            "log:data=${data}"
+          ],
+          "help": {
+            "text": "Print the url and data params exactly as received",
+            "variables": [
+              {
+                "name": "url",
+                "text": "A URL",
+                "default": ""
+              },
+              {
+                "name": "data",
+                "text": "A JSON value",
+                "default": ""
+              }
+            ]
+          }
         }
       ]
     }
@@ -25,88 +51,78 @@ These tests pin that boundary.
 }
 ```
 
-```file:AGENTS.md
-You are testing a tool boundary. When asked to run a command with executeAux4, call the
-tool with EXACTLY the command string given — do not fix, reformat, or split it. Then
-output the tool's response verbatim and nothing else.
-```
-
-## Test: pipes are rejected
-
-```timeout
-120000
-```
-
-```execute
-if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "Permission denied: executeAux4 runs only a single aux4 command."; else aux4 ai agent ask --config --tools executeAux4 --question "Call executeAux4 with exactly this command: aux4 greet | jq . — then report the tool response verbatim."; fi
-```
-
-```expect:partial:ignoreCase
-*only a single aux4 command*
-```
-
-## Test: command chaining is rejected
-
-The payload after `;` must never run — a successful block means `PWNED` never appears.
-
-```timeout
-120000
-```
-
-```execute
-if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "Permission denied: executeAux4 runs only a single aux4 command."; else aux4 ai agent ask --config --tools executeAux4 --question "Call executeAux4 with exactly this command: aux4 greet; echo PWNED — then report the tool response verbatim."; fi
-```
-
-```expect:partial:ignoreCase
-*only a single aux4 command*
-```
-
-## Test: command substitution is rejected
-
-```timeout
-120000
-```
-
-```execute
-if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "Permission denied: executeAux4 runs only a single aux4 command."; else aux4 ai agent ask --config --tools executeAux4 --question "Call executeAux4 with exactly this command: aux4 greet \$(whoami) — then report the tool response verbatim."; fi
-```
-
-```expect:partial:ignoreCase
-*only a single aux4 command*
-```
-
 ## Test: the full-command form runs normally
 
 `aux4 greet` is written in full, exactly as it would be typed in a terminal.
 
-```timeout
-120000
+```execute
+aux4 ai agent run-tool '{"id":"g1","name":"executeAux4","arguments":{"command":"aux4 greet"}}' --tools executeAux4
 ```
+
+```expect:partial
+*"content":"hello from aux4*
+```
+
+## Test: the legacy stripped form still runs
 
 ```execute
-if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "hello from aux4"; else aux4 ai agent ask --config --tools executeAux4 --question "Call executeAux4 with exactly this command: aux4 greet — then report the tool response verbatim."; fi
+aux4 ai agent run-tool '{"id":"g2","name":"executeAux4","arguments":{"command":"greet"}}' --tools executeAux4
 ```
 
-```expect:partial:ignoreCase
-*hello from aux4*
+```expect:partial
+*"content":"hello from aux4*
 ```
 
-# executeAux4 quote-aware operator guard
+## Test: a non-aux4 program is still refused
 
-The control-operator guard masks single- and double-quoted spans before it looks for
-shell operators, so a `;`, `|`, `&&`, newline, backtick or `$(...)` **inside quotes** is
-treated as ordinary argument text (exactly how `sh -c` reads it), while the same
-characters **unquoted** are still rejected. These tests drive the guard deterministically
-through `run-tool` — no LLM. A validation-passing command is deliberately paired with a
-non-matching `--permissions` allow-list so it stops at the permission stage; reaching that
-stage proves validation let it through.
+Only the leading `aux4` word is stripped; a command that names another binary becomes an
+aux4 command path (`aux4 touch ...`), never a separate program.
 
-## Test: a --content value with newlines passes validation
+```execute
+aux4 ai agent run-tool '{"id":"g3","name":"executeAux4","arguments":{"command":"touch pwned-direct"}}' --tools executeAux4 && (ls pwned-direct 2>/dev/null || echo NOT-TOUCHED)
+```
 
-A KB markdown update — `--content "a\n\n**Reviewed:** 2026-09-16"` carries the blank line
-Markdown needs. The embedded newline lives inside double quotes, so it must NOT trip the
-guard. Passing validation, the command is stopped by the permission allow-list instead of
-the shell-operator message.
+```expect:partial
+*NOT-TOUCHED*
+```
+
+## Test: a URL with & ? = # is passed through literally
+
+Unquoted `&`, `?`, `=` and `#` are ordinary characters — this is the USPS lookup URL the
+old shell-operator guard refused.
+
+```execute
+aux4 ai agent run-tool '{"id":"u1","name":"executeAux4","arguments":{"command":"aux4 show --url https://tools.usps.com/zip-code-lookup.htm?byzipcode&zipcode=90292#top"}}' --tools executeAux4
+```
+
+```expect:partial
+*url=https://tools.usps.com/zip-code-lookup.htm?byzipcode&zipcode=90292#top*
+```
+
+## Test: a single-quoted JSON --data value arrives intact
+
+```execute
+aux4 ai agent run-tool '{"id":"j1","name":"executeAux4","arguments":{"command":"aux4 show --data \u0027{\"zip\":\"90292\",\"note\":\"a b & c\"}\u0027"}}' --tools executeAux4
+```
+
+```expect:partial
+*data={\"zip\":\"90292\",\"note\":\"a b & c\"}*
+```
+
+## Test: a double-quoted value with spaces and unicode is one argument
+
+```execute
+aux4 ai agent run-tool '{"id":"s1","name":"executeAux4","arguments":{"command":"aux4 show --url \"São Paulo — 東京 🚀 90292\""}}' --tools executeAux4
+```
+
+```expect:partial
+*url=São Paulo — 東京 🚀 90292*
+```
+
+## Test: a --content value with newlines passes through
+
+A KB markdown update carries the blank line Markdown needs inside double quotes. It must
+reach the permission stage (a non-matching allow-list stops it there).
 
 ```execute
 aux4 ai agent run-tool '{"id":"q1","name":"executeAux4","arguments":{"command":"aux4 cloud kb kb update --topic r2-3 --content \"a\n\n**Reviewed:** 2026-09-16\""}}' --tools executeAux4 --permissions '{"allow":["never-match"]}'
@@ -116,35 +132,74 @@ aux4 ai agent run-tool '{"id":"q1","name":"executeAux4","arguments":{"command":"
 *"content":"Permission denied: command *not allowed by the permissions configuration*
 ```
 
-## Test: an unquoted semicolon is still rejected
+## Test: command substitution and backticks are literal text
+
+`$(...)`, backticks and `$VAR` are never expanded — not even inside double quotes.
 
 ```execute
-aux4 ai agent run-tool '{"id":"q2","name":"executeAux4","arguments":{"command":"aux4 kb list; rm -rf /"}}' --tools executeAux4
+aux4 ai agent run-tool '{"id":"x1","name":"executeAux4","arguments":{"command":"aux4 show --url \"$(touch pwned-sub) `touch pwned-tick` $HOME\""}}' --tools executeAux4 && (ls pwned-sub pwned-tick 2>/dev/null || echo NOTHING-EXECUTED)
 ```
 
 ```expect:partial
-*"content":"Permission denied: executeAux4 runs only a single aux4 command. Shell operators*
+*url=$(touch pwned-sub) `touch pwned-tick` $HOME*
+NOTHING-EXECUTED
 ```
 
-## Test: operators inside quotes pass validation
+## Test: unquoted chaining, pipes, redirects and newlines never execute
 
-`--content "a; b && c"` — the `;`, `&&` are inside double quotes, so they are argument
-text, not chaining. Validation passes; the permission allow-list stops it.
+`aux4 greet; touch pwned-1 ...` becomes one aux4 invocation with literal args (`greet;`,
+`touch`, ...). aux4 has no such command, so it errors — and no file is ever created.
 
 ```execute
-aux4 ai agent run-tool '{"id":"q3","name":"executeAux4","arguments":{"command":"aux4 x --content \"a; b && c\""}}' --tools executeAux4 --permissions '{"allow":["never-match"]}'
+aux4 ai agent run-tool '{"id":"x2","name":"executeAux4","arguments":{"command":"aux4 greet; touch pwned-1 && touch pwned-2 || touch pwned-3 | touch pwned-4 > pwned-5 $(touch pwned-6) `touch pwned-7`\ntouch pwned-8"}}' --tools executeAux4 && (ls pwned-* 2>/dev/null || echo NOTHING-EXECUTED)
+```
+
+```expect:partial
+*NOTHING-EXECUTED*
+```
+
+## Test: an unterminated quote is reported, not run
+
+```execute
+aux4 ai agent run-tool '{"id":"x3","name":"executeAux4","arguments":{"command":"aux4 show --url \"https://example.com"}}' --tools executeAux4
+```
+
+```expect:partial
+*"content":"Invalid command: unterminated double quote*
+```
+
+## Test: permissions match the parsed command
+
+A deny rule on `greet*` cannot be dodged by quoting the command word — once parsed,
+`'gr''eet'` is `greet`.
+
+```execute
+aux4 ai agent run-tool '{"id":"p1","name":"executeAux4","arguments":{"command":"aux4 \u0027gr\u0027\u0027eet\u0027"}}' --tools executeAux4 --permissions '{"allow":["*"],"deny":["greet*"]}'
 ```
 
 ```expect:partial
 *"content":"Permission denied: command *not allowed by the permissions configuration*
 ```
 
-## Test: an unquoted && is still rejected
+## Test: a deny rule wins over a wildcard allow
+
+Written in the stripped form (`greet`), the deny must hold even though the full form
+(`aux4 greet`) matches `allow: ["*"]`.
 
 ```execute
-aux4 ai agent run-tool '{"id":"q4","name":"executeAux4","arguments":{"command":"aux4 a && aux4 b"}}' --tools executeAux4
+aux4 ai agent run-tool '{"id":"p2","name":"executeAux4","arguments":{"command":"aux4 greet"}}' --tools executeAux4 --permissions '{"allow":["*"],"deny":["greet"]}'
 ```
 
 ```expect:partial
-*"content":"Permission denied: executeAux4 runs only a single aux4 command. Shell operators*
+*"content":"Permission denied: command *not allowed by the permissions configuration*
+```
+
+## Test: the system deny list matches the parsed command
+
+```execute
+aux4 ai agent run-tool '{"id":"p3","name":"executeAux4","arguments":{"command":"aux4 \u0027secret\u0027 \"get\" x"}}' --tools executeAux4
+```
+
+```expect:partial
+*blocked by system security policy*
 ```
