@@ -1,5 +1,16 @@
 # Release notes
 
+## Generic skill hooks around ask/chat
+
+Any installed skill (an aux4 package under `aux4 ai skill <name>`) can now hook into `ask`/`chat`
+without either command knowing it exists. Before the model runs, every installed skill that exposes
+`hook-before --request <question>` is invoked and its non-empty output is injected into the model's
+context for that turn. After the answer is final, every installed skill that exposes `hook-after
+--request <question> --history <file>` is invoked and its non-empty output is appended after the
+answer. Discovery is a cheap local `--help` probe — no model call, no network — so a skill that
+implements neither hook is never invoked, and any hook failure (missing, non-zero exit, 5s timeout)
+is logged and ignored rather than breaking the call. Disable with `--skillHooks false`.
+
 ## A permission denial now says what you may run instead
 
 `Permission denied: command "aux4 calendar next" is not allowed by the permissions configuration.`

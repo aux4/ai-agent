@@ -102,7 +102,10 @@ function parsePolicyArg(value) {
         // Appended LAST on purpose: these args are positional, so new params must go
         // at the end or they shift every following arg (policy/runId/costs).
         tools: args[23] || "",
-        packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
+        packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : "",
+        // Named flag, not positional -- same reasoning as packageDir above: new params
+        // added after the positional block must not shift existing indices.
+        skillHooks: args.indexOf("--skillHooks") !== -1 ? args[args.indexOf("--skillHooks") + 1] : "true"
       });
     } else if (command === "image") {
       await imageExecutor({

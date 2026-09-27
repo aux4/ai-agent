@@ -847,6 +847,33 @@ Override the default path with `--skills`:
 aux4 ai agent ask "Review my code" --skills ./my-skills
 ```
 
+### Skill Hooks
+
+Any installed skill (an aux4 package that contributes commands under `aux4 ai skill <name>`) can hook
+into the request/response lifecycle of `ask` and `chat` without the agent needing to know it exists:
+
+- **`hook-before`** — if a skill exposes `aux4 ai skill <name> hook-before --request <text>`, it runs
+  once before the model sees the question. Its stdout (when non-empty) is injected into the model's
+  context for that turn as an additional instruction — useful for surfacing something the skill knows
+  ahead of time (a saved procedure that matches the request, a relevant fact, a warning).
+- **`hook-after`** — if a skill exposes `aux4 ai skill <name> hook-after --request <text> --history
+  <file>`, it runs once after the model's answer is final, with the conversation's history file. Its
+  stdout (when non-empty) is appended to what's shown to the user — useful for a one-line suggestion
+  based on what just happened (e.g. "this looks worth saving").
+
+This is purely a discovery-and-forwarding mechanism — `ask`/`chat` never hardcode which skill(s)
+implement a hook. Discovery is cheap: for each installed skill, `--help` is checked locally for a
+`hook-before`/`hook-after` command (no model call, no network); only skills that actually advertise
+the command are invoked. A skill that implements neither hook is never called for this. Any hook
+failure (missing, non-zero exit, timeout after 5s) is logged and ignored — hooks can never break the
+underlying `ask`/`chat` call.
+
+Disable both hooks for a call with `--skillHooks false` (default: `true`):
+
+```bash
+aux4 ai agent ask --skillHooks false "What's the capital of France?"
+```
+
 ---
 
 ## Permissions

@@ -242,6 +242,8 @@ class Prompt {
     if (this.callback) {
       this.callback(`${answer}`);
     }
+
+    return answer;
   }
 
   async execute() {

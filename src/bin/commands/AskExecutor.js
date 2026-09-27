@@ -4,7 +4,7 @@ import Prompt, { PromptError } from "../../lib/Prompt.js";
 import { readFile, asJson } from "../../lib/util/FileUtils.js";
 import { readStdIn } from "../../lib/util/Input.js";
 import { resolveFromConfig } from "../../lib/ModelResolver.js";
-import { loadSkillsCatalog } from "../../lib/Skills.js";
+import { loadSkillsCatalog, runHookBefore, runHookAfter } from "../../lib/Skills.js";
 import { Policy } from "../../lib/Policy.js";
 
 export async function askExecutor(params) {
@@ -36,6 +36,7 @@ export async function askExecutor(params) {
     const permissions = params.permissions;
     const references = params.references || (params.packageDir ? path.join(params.packageDir, "references") : "");
     const skills = params.skills || "skills";
+    const skillHooksEnabled = params.skillHooks !== false && params.skillHooks !== "false";
 
     // Optional policy guardrails. An inline policy object (aux4 delivers a config.yaml
     // object param as a JSON string for free, parsed upstream). Absent => no policy =>
@@ -139,9 +140,28 @@ export async function askExecutor(params) {
 
     prompt.setOutputSchema(await readFile(outputSchema).then(asJson()));
 
-    await prompt.message(message, params, role);
+    if (skillHooksEnabled) {
+      const beforeOutputs = runHookBefore(question);
+      for (const output of beforeOutputs) {
+        await prompt.instructions(output);
+      }
+    }
+
+    const answer = await prompt.message(message, params, role);
+
+    if (skillHooksEnabled) {
+      const afterOutputs = runHookAfter(question, history);
+      for (const output of afterOutputs) {
+        if (stream === true || stream === "true") {
+          process.stdout.write(`\n${output}\n`);
+        } else {
+          console.log(output);
+        }
+      }
+    }
 
     prompt.close();
+    return answer;
   } catch (error) {
     if (error instanceof PromptError) {
       console.error("Prompt error:", error.message);

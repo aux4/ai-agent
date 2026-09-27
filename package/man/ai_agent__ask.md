@@ -18,11 +18,12 @@ Key features:
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
+- **Skill hooks** — any installed skill that exposes a `hook-before`/`hook-after` command is run automatically around the request/response; disable with `--skillHooks false`
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--skillHooks <true|false>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -45,6 +46,7 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: skills)
+--skillHooks     Run installed skills' hook-before/hook-after commands around this ask (default: true)
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -64,6 +66,8 @@ Compaction config fields:
 **Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).
 
 **Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand using the `readSkill` tool. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
+
+**Skill hooks (`--skillHooks`):** Separately from the folder-based skills above, any *installed* skill (an aux4 package contributing commands under `aux4 ai skill <name>`) can hook into this call without `ask` knowing it exists. Before the model runs, every installed skill that exposes `aux4 ai skill <name> hook-before --request <question>` is invoked, and any non-empty stdout is injected into the model's context for that turn. After the answer is final, every installed skill that exposes `aux4 ai skill <name> hook-after --request <question> --history <file>` is invoked with the `--history` file for this call, and any non-empty stdout is appended after the answer. Discovery is a local `--help` probe (no model call) — a skill that implements neither command is never invoked. Any hook failure (missing, non-zero exit, 5s timeout) is logged and ignored; it never fails the ask. Set `--skillHooks false` to skip this entirely.
 
 #### Example
 
