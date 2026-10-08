@@ -18,11 +18,12 @@ Key features:
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
+- **searchContext embeddings** — the `searchContext` tool (document retrieval against `--storage`) uses `--embeddings` to pick its embeddings provider/config; default type is `local` (offline, no API key). Must match what `--storage` was learned with
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--embeddings <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -41,6 +42,7 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --policy         Optional guardrail policy as an inline object with budget/allow/deny/escalate, delivered as JSON (default: "")
 --runId          Optional run identifier injected into escalation commands as ${runId}; auto-generated when empty (default: "")
 --costs          Optional cost rates as JSON (costIn, costOut, costCache per 1M tokens) used for the policy usd budget (default: {})
+--embeddings     Embeddings configuration as JSON for the searchContext tool, `{"type": "...", "config": {...}}` (default: {}, which resolves to type local). Must match what --storage was learned with
 --models         Models registry as JSON (default: {})
 --useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)

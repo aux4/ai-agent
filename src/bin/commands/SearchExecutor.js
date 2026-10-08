@@ -1,5 +1,6 @@
 import LlmStore from "../../lib/LlmStore.js";
-import { getEmbeddings } from "../../lib/Embeddings.js";
+import { getEmbeddings, DEFAULT_EMBEDDINGS_TYPE } from "../../lib/Embeddings.js";
+import { ensureCompatibleEmbeddings } from "../../lib/EmbeddingsGuard.js";
 
 export async function searchExecutor(params) {
   const storage = params.storage;
@@ -9,8 +10,9 @@ export async function searchExecutor(params) {
   const source = params.source;
   const embeddingsConfig = params.embeddings;
 
-  const type = embeddingsConfig ? embeddingsConfig.type || "openai" : "openai";
-  const config = embeddingsConfig ? embeddingsConfig.config : {};
+  const type = embeddingsConfig ? embeddingsConfig.type || DEFAULT_EMBEDDINGS_TYPE : DEFAULT_EMBEDDINGS_TYPE;
+  const config = embeddingsConfig ? embeddingsConfig.config || {} : {};
+  ensureCompatibleEmbeddings(storage, type, config);
   const Embeddings = getEmbeddings(type);
   const embeddings = new Embeddings(config);
 

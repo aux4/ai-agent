@@ -99,6 +99,9 @@ function parsePolicyArg(value) {
         policy: parsePolicyArg(args[20]),
         runId: args[21] || "",
         costs: JSON.parse(args[22] || "{}"),
+        // Appended LAST on purpose: these args are positional, so new params must go
+        // at the end or they shift every following arg (policy/runId/costs).
+        embeddings: JSON.parse(args[23] || "{}"),
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
       });
     } else if (command === "image") {

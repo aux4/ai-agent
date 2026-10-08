@@ -6,7 +6,8 @@ import readline from "node:readline";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import LlmStore from "./LlmStore.js";
-import { getEmbeddings } from "./Embeddings.js";
+import { getEmbeddings, DEFAULT_EMBEDDINGS_TYPE } from "./Embeddings.js";
+import { ensureCompatibleEmbeddings } from "./EmbeddingsGuard.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
 
 // Import tool descriptions
@@ -1421,11 +1422,18 @@ export const createAskUserTool = () => tool(
 export const askUserTool = createAskUserTool();
 
 export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig = {}) => tool(
-  async ({ query, storage, limit = 5, source, embeddingsType = "openai", embeddingsConfig = {} }) => {
+  async ({ query, storage, limit = 5, source, embeddingsType, embeddingsConfig }) => {
     try {
       // Use provided storage or fall back to default
       const storageToUse = storage || defaultStorage;
-      const embeddingsConfigToUse = Object.keys(embeddingsConfig).length > 0 ? embeddingsConfig : defaultEmbeddingsConfig;
+
+      // The model may override the type/config per call; otherwise fall back to whatever the
+      // agent was configured with (defaultEmbeddingsConfig, shape {type, config}), and finally to
+      // the shared default type. "openai" is never assumed unless nothing else says otherwise.
+      const typeToUse = embeddingsType || defaultEmbeddingsConfig.type || DEFAULT_EMBEDDINGS_TYPE;
+      const configToUse = (embeddingsConfig && Object.keys(embeddingsConfig).length > 0)
+        ? embeddingsConfig
+        : defaultEmbeddingsConfig.config || {};
 
       if (!storageToUse) {
         return "No storage directory provided. Please specify a storage parameter or configure a default storage location.";
@@ -1439,9 +1447,11 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
         throw new Error("Access denied");
       }
 
+      ensureCompatibleEmbeddings(storageDirectory, typeToUse, configToUse);
+
       // Initialize embeddings
-      const Embeddings = getEmbeddings(embeddingsType);
-      const embeddings = new Embeddings(embeddingsConfigToUse);
+      const Embeddings = getEmbeddings(typeToUse);
+      const embeddings = new Embeddings(configToUse);
 
       // Initialize and load the store
       const store = new LlmStore(storageDirectory, embeddings);
@@ -1486,7 +1496,7 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
       storage: z.string().optional().describe("Path to the storage directory containing the vector store (optional if default is configured)"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 5)"),
       source: z.string().optional().describe("Optional: search only in a specific source file"),
-      embeddingsType: z.string().optional().describe("Type of embeddings to use (default: 'openai')"),
+      embeddingsType: z.string().optional().describe(`Type of embeddings to use (default: '${DEFAULT_EMBEDDINGS_TYPE}')`),
       embeddingsConfig: z.object({}).optional().describe("Configuration object for the embeddings")
     })
   }

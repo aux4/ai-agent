@@ -1,12 +1,15 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.2.4",
+  "version": "1.2.4-local",
   "description": "AI agent",
   "tags": [
     "ai",
     "agent",
     "llm"
+  ],
+  "dependencies": [
+    "aux4/embedding"
   ],
   "profiles": [
     {
@@ -43,7 +46,7 @@
         {
           "name": "learn",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs learn values(storage, doc, type)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs learn values(storage, doc, type, embeddings)"
           ],
           "help": {
             "text": "Learn from a document or folder",
@@ -62,6 +65,11 @@
                 "name": "type",
                 "text": "The type of document",
                 "default": ""
+              },
+              {
+                "name": "embeddings",
+                "text": "Embeddings configuration as JSON (e.g., {\"type\":\"local\",\"config\":{\"dimension\":768}}). Default type is 'local' (offline, no API key)",
+                "default": "{}"
               }
             ]
           }
@@ -69,7 +77,7 @@
         {
           "name": "search",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs search values(storage, format, source, limit, query)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs search values(storage, format, source, limit, query, embeddings)"
           ],
           "help": {
             "text": "Search on documents",
@@ -102,6 +110,11 @@
                 "name": "query",
                 "text": "The query to search for",
                 "arg": true
+              },
+              {
+                "name": "embeddings",
+                "text": "Embeddings configuration as JSON (e.g., {\"type\":\"local\",\"config\":{\"dimension\":768}}). Must match what the store was learned with. Default type is 'local' (offline, no API key)",
+                "default": "{}"
               }
             ]
           }
@@ -109,7 +122,7 @@
         {
           "name": "forget",
           "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs forget values(storage, doc)"
+            "node ${packageDir}/lib/aux4-ai-agent.cjs forget values(storage, doc, embeddings)"
           ],
           "help": {
             "text": "Forget learned documents",
@@ -124,6 +137,11 @@
                 "text": "File or folder to forget (all if omitted)",
                 "default": "",
                 "arg": true
+              },
+              {
+                "name": "embeddings",
+                "text": "Embeddings configuration as JSON (e.g., {\"type\":\"local\",\"config\":{\"dimension\":768}}). Only needed when forgetting a specific doc (ignored when clearing the whole store)",
+                "default": "{}"
               }
             ]
           }
@@ -131,7 +149,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, embeddings) --packageDir ${packageDir}"
           ],
           "help": {
             "text": "Ask your question",
@@ -239,6 +257,11 @@
               {
                 "name": "costs",
                 "text": "Optional cost rates as JSON (costIn, costOut, costCache per 1M tokens) used for the policy usd budget",
+                "default": "{}"
+              },
+              {
+                "name": "embeddings",
+                "text": "Embeddings configuration as JSON for the searchContext tool (e.g., {\"type\":\"local\",\"config\":{\"dimension\":768}}). Must match what --storage was learned with. Default type is 'local' (offline, no API key)",
                 "default": "{}"
               },
               {
