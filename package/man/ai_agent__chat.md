@@ -27,7 +27,7 @@ aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--his
 --models         Models registry as JSON (default: {})
 --useModel       Named model from registry to use for this request (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
---skills         Path to the skills directory (default: skills)
+--skills         Path to the skills directory (default: .agents/skills)
 text             Initial text to send (positional argument)
 
 #### Example

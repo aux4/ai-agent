@@ -69,7 +69,9 @@ class ImageGenerator {
   }
 
   async generateOpenAIImage(prompt, options = {}) {
-    const defaultModel = this.type === "xai" ? "grok-2-image-latest" : "dall-e-3";
+    // dall-e-3/dall-e-2 have been retired on the OpenAI Images API; gpt-image-1
+    // is the current default model for new API keys/projects.
+    const defaultModel = this.type === "xai" ? "grok-2-image-latest" : "gpt-image-1";
     const model = this.config.config?.model || defaultModel;
 
     // Handle quality parameter for different model types
@@ -168,7 +170,7 @@ class ImageGenerator {
   getSupportedModels() {
     switch (this.type) {
       case "openai":
-        return ["dall-e-3", "dall-e-2"];
+        return ["gpt-image-1", "gpt-image-1-mini", "dall-e-3", "dall-e-2"];
       case "xai":
         return ["grok-2-image-latest"];
       default:
@@ -182,14 +184,17 @@ class ImageGenerator {
    */
   getSupportedSizes() {
     switch (this.type) {
-      case "openai":
-        const model = this.config.config?.model || "dall-e-3";
+      case "openai": {
+        const model = this.config.config?.model || "gpt-image-1";
         if (model === "dall-e-3") {
           return ["1024x1024", "1024x1792", "1792x1024"];
         } else if (model === "dall-e-2") {
           return ["256x256", "512x512", "1024x1024"];
+        } else if (model.startsWith("gpt-image")) {
+          return ["1024x1024", "1024x1536", "1536x1024"];
         }
         return ["1024x1024"];
+      }
       case "xai":
         return []; // xAI/Grok doesn't support size parameter
       default:
