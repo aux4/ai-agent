@@ -435,6 +435,28 @@ class Prompt {
               ? response.content.filter(c => c.type === "text").map(c => c.text).join("") || JSON.stringify(response)
               : JSON.stringify(response);
 
+      // No tool calls AND nothing said is not an answer -- the model stopped generating
+      // mid-task. Terminating here ends the run silently, which reads downstream as "the agent
+      // decided it was finished" when it simply died. Retry once before believing it.
+      if (!answer || !answer.trim()) {
+        this._emptyRetried = (this._emptyRetried || 0) + 1;
+        if (this._emptyRetried <= 2) {
+          // Retrying the IDENTICAL context reproduces the identical stall -- observed failing
+          // every time. Append a nudge so the next request differs from the one that died, and
+          // give it two attempts rather than one.
+          console.error(`[agent] empty response with no tool calls -- retry ${this._emptyRetried}/2`);
+          this.messages.push({
+            role: "user",
+            content: "You returned nothing. Look at the last tool result, say what state you are in, and take the next action.",
+            timestamp: Date.now()
+          });
+          return await this.execute();
+        }
+        answer = "The model returned an empty response three times in a row and the task was not completed.";
+      } else {
+        this._emptyRetried = 0;
+      }
+
       if (this.outputSchema) {
         let jsonStr = answer.trim();
         const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);

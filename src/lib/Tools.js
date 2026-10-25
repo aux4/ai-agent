@@ -1524,6 +1524,69 @@ export const searchContextTool = createSearchContextTool();
 // supplied by getUsage). On deny the underlying tool never runs and the model gets a
 // short adaptive message. Every decision is recorded on the policy so Prompt can
 // attach it to the history `tool` entry when --history is set.
+// An agent that repeats the same call and gets the same answer is not making progress, and
+// nothing in the loop notices: a model can burn its whole budget re-running four calls. Compare
+// the ARGUMENTS AND THE RESULT -- a repeated call whose result changes is legitimate (polling),
+// a repeated call whose result does not is stuck. On the third identical pair, say so instead of
+// running it again.
+const LOOP_REPEAT_LIMIT = 3;
+// How many refusals of the SAME call before the run is aborted outright.
+const LOOP_ABORT_AFTER = 3;
+
+function wrapWithLoopDetection(name, underlyingTool) {
+  const seen = new Map();
+
+  return tool(
+    async (args) => {
+      const cleanArgs = { ...args };
+      delete cleanArgs.__policyCallId;
+      // Volatile identifiers defeat the comparison: a browser daemon restart yields a new
+      // session id, so an agent repeating the identical journey looks like all-new calls.
+      // Normalise them out so the key describes what is being done, not which handle it used.
+      const key = JSON.stringify(cleanArgs)
+        .replace(/--session[= ]+[A-Za-z0-9-]+/g, "--session <id>")
+        .replace(/"sessionId"\s*:\s*"[^"]*"/g, '"sessionId":"<id>"');
+      const prior = seen.get(key);
+
+      if (prior && prior.count >= LOOP_REPEAT_LIMIT - 1) {
+        prior.blocked = (prior.blocked || 0) + 1;
+        seen.set(key, prior);
+
+        // Refusing is not enough on its own: a model that ignores the refusal simply re-issues
+        // the call, and each refusal is appended to the history and replayed on every later
+        // request. One unbounded run reached 624 calls and 26M input tokens that way -- the
+        // detector generating the waste it exists to prevent. After a few refusals, stop.
+        if (prior.blocked >= LOOP_ABORT_AFTER) {
+          const err = new Error(
+            `Aborting: the same call has been refused ${prior.blocked} times and keeps being repeated. `
+            + `The agent is not making progress and each attempt grows the context. Last result was:\n`
+            + String(prior.result).slice(0, 200)
+          );
+          err.loopAbort = true;
+          throw err;
+        }
+
+        const sample = String(prior.result).slice(0, 200);
+        return `Not run: you have already made this exact call ${prior.count} times and it returned`
+          + ` the same result every time:\n${sample}\n\nRepeating it will not change anything.`
+          + ` Read the current state and take a different route, or stop and report what is blocking you.`;
+      }
+
+      const result = await underlyingTool.invoke(args);
+      const asText = String(result);
+      seen.set(key, prior && prior.result === asText
+        ? { count: prior.count + 1, result: asText }
+        : { count: 1, result: asText });
+      return result;
+    },
+    {
+      name,
+      description: underlyingTool.description || (underlyingTool.lc_kwargs && underlyingTool.lc_kwargs.description) || name,
+      schema: underlyingTool.schema
+    }
+  );
+}
+
 function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
   if (!policy) return underlyingTool;
 
@@ -1572,13 +1635,20 @@ export function createTools(config = {}) {
     readSkill: createReadSkillTool(skills)
   };
 
-  if (!policy) return base;
-
-  // Gate only the consequential tools; read-only tools stay exempt.
-  const CONSEQUENTIAL = ["executeAux4", "writeFile", "editFile", "removeFiles", "createDirectory", "saveImage"];
-  for (const name of CONSEQUENTIAL) {
-    base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
+  if (policy) {
+    // Gate only the consequential tools; read-only tools stay exempt.
+    const CONSEQUENTIAL = ["executeAux4", "writeFile", "editFile", "removeFiles", "createDirectory", "saveImage"];
+    for (const name of CONSEQUENTIAL) {
+      base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
+    }
   }
+
+  // Loop detection wraps every bound tool: a stuck agent repeats any of them, not just the
+  // consequential ones.
+  for (const name of Object.keys(base)) {
+    base[name] = wrapWithLoopDetection(name, base[name]);
+  }
+
   return base;
 }
 

@@ -501,6 +501,66 @@ For more details see [aux4 ai agent image](./commands/ai/agent/image).
 
 ---
 
+## AWS Bedrock
+
+Two ways in, and they cover different model sets.
+
+### Bedrock Converse (`type: bedrock`)
+
+For models in the Bedrock foundation-model catalogue — Anthropic, Llama, Mistral, Nova, and the
+`google.gemma-3-*` family. List what your account can reach with
+`aws bedrock list-foundation-models`:
+
+```yaml
+config:
+  model:
+    type: bedrock
+    config:
+      model: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+      region: us-east-1
+```
+
+### Mantle, the OpenAI-compatible endpoint
+
+Some models are served only through Bedrock's OpenAI-compatible endpoint and **do not appear in
+`list-foundation-models`** — `google.gemma-4-26b-a4b` is one. Looking for them in the catalogue
+and concluding they are unavailable is the easy mistake; they are reachable at
+`https://bedrock-mantle.<region>.api.aws/openai/v1`.
+
+Use `type: openai` pointed at that base URL, and let `awsSigv4` sign the requests with your normal
+AWS credential chain — no API key is minted or stored:
+
+```yaml
+config:
+  model:
+    type: openai
+    config:
+      model: google.gemma-4-26b-a4b
+      maxTokens: 1024
+      awsSigv4:
+        region: us-east-1
+        service: bedrock
+      configuration:
+        baseURL: https://bedrock-mantle.us-east-1.api.aws/openai/v1
+```
+
+Then run with whichever profile has the permissions:
+
+```bash
+AWS_PROFILE=<profile> aux4 ai agent ask --configFile config.yaml --config --question "..."
+```
+
+`awsSigv4` takes `region`, `service`, and optionally `credentials`. Region falls back to
+`AWS_REGION` / `AWS_DEFAULT_REGION`. The OpenAI SDK insists on a non-empty `apiKey`, so a
+placeholder is filled in for you and never sent.
+
+**Permissions are split by action.** Invoking and listing are separate: a user can hold
+`bedrock:InvokeModel` and still get `AccessDeniedException` on `bedrock:ListFoundationModels`. If
+listing fails, that does not mean the model is unreachable — try calling it.
+
+The endpoint serves chat completions only; there is no `/openai/v1/models` listing (it 404s), so
+model ids come from the console, the pricing dimensions, or whoever set the account up.
+
 ## Model Selection
 
 The agent supports a named model registry so you can define multiple models and select one by name with `--useModel` instead of passing inline model JSON every time.
