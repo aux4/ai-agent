@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+// Stand-in for the real `aux4` binary on PATH, used only by the identical-failing-call
+// loop-guard tests (HARN-029). Simulates `aux4 google gmail get --id <id>`: fails with a
+// FIXED error message unless --messageId is also present, in which case it succeeds. This
+// lets a test drive "the same broken call always fails the same way" vs "adding the
+// missing flag fixes it" deterministically, with no real gmail/model involved. Also counts
+// how many times it actually ran (one line per invocation) into a counter file so the test
+// can assert the loop guard, not this script, is what stopped the repeats.
+import fs from "node:fs";
+
+const args = process.argv.slice(2);
+const counterFile = process.env.AUX4_LOOP_GUARD_COUNTER;
+if (counterFile) {
+  fs.appendFileSync(counterFile, "1\n");
+}
+
+const messageIdIndex = args.indexOf("--messageId");
+if (messageIdIndex !== -1 && args[messageIdIndex + 1]) {
+  console.log(`Email retrieved: ${args[messageIdIndex + 1]}`);
+  process.exit(0);
+}
+
+console.error("Error executing command: Missing required parameter --messageId: The message ID to retrieve");
+process.exit(1);
