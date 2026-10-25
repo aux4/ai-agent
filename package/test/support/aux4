@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// Stand-in for the real `aux4` binary on PATH: prints its argv (exactly as received by
+// spawn, one per line, JSON-encoded so embedded $, spaces, etc. are visible verbatim)
+// and exits 0. Used to prove executeAux4 passes argv to spawn() unmangled, with no
+// shell in between.
+console.log(JSON.stringify(process.argv.slice(2)));

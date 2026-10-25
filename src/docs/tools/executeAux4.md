@@ -58,3 +58,20 @@ aux4 supports loading parameters from `config.yaml`:
 "deploy --config dev"
 "deploy --configFile custom.yaml --config staging"
 ```
+
+## Quoting
+
+The command runs `aux4` directly — there is no shell involved, so nothing in it is ever
+shell-expanded. Quote an argument that contains spaces with `"..."` or `'...'`, exactly as
+you would type it in a terminal:
+
+- `'...'` is literal — nothing inside is special.
+- `"..."` allows `\"` and `\\` escapes only. `$`, `` ` ``, `$()`, `${}` and `~` are NEVER
+  expanded, quoted or not — write them exactly as they should reach the command, e.g.
+  `"price $482.50"` arrives as `price $482.50`.
+- Characters like `;`, `|`, `&`, `>`, `<` are plain text when they're part of an argument
+  (a URL `"http://host/path?a=1&b=2"` passes through untouched). An UNQUOTED `;`, `|`,
+  `&&`, `||`, `>` or `<` that stands as its OWN word is rejected with an error — it almost
+  always means you meant shell chaining, which does not run here. Make one `executeAux4`
+  call per command instead.
+- An unterminated quote or a trailing lone backslash is rejected with `Invalid command: ...`.

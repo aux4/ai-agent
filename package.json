@@ -11,6 +11,7 @@
   "scripts": {
     "build": "rollup -c && cd package/lib && npm install",
     "test": "aux4 test run",
+    "test:unit": "node --test test/*.mjs",
     "lint": "eslint src"
   },
   "repository": {

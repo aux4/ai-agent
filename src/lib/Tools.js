@@ -8,6 +8,7 @@ import { tool } from "@langchain/core/tools";
 import LlmStore from "./LlmStore.js";
 import { getEmbeddings } from "./Embeddings.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
+import { buildAux4Argv, CommandParseError } from "./CommandArgs.js";
 
 // Import tool descriptions
 import readFileDesc from "../docs/tools/readFile.md?raw";
@@ -312,7 +313,10 @@ export const createDirectoryTool = tool(
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
 
-function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
+// `cmd` is the display form (`aux4 <command>`, used for the jobs-attach label and
+// timeout/error messages); `argv` is what actually runs: `aux4` is spawned directly with
+// it — no shell, so nothing in it is ever interpreted.
+function executeWithTimeout(cmd, { argv, stdin, timeout, cwd } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
   const tmpDir = os.tmpdir();
@@ -337,7 +341,7 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
     };
     if (cwd) spawnOptions.cwd = cwd;
 
-    const child = spawn("sh", ["-c", cmd], spawnOptions);
+    const child = spawn("aux4", argv, spawnOptions);
 
     if (stdin) {
       child.stdin.write(stdin);
@@ -507,8 +511,18 @@ export const executeAux4CliTool = tool(
       }
     }
 
+    let argv;
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
+      argv = buildAux4Argv(command);
+    } catch (error) {
+      if (error instanceof CommandParseError) {
+        return `Invalid command: ${error.message}. Quote arguments that contain spaces with matching "..." or '...' quotes.`;
+      }
+      throw error;
+    }
+
+    try {
+      const result = await executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -625,8 +639,18 @@ export const createExecuteAux4Tool = (permissions) => tool(
       }
     }
 
+    let argv;
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { stdin, timeout, cwd });
+      argv = buildAux4Argv(command);
+    } catch (error) {
+      if (error instanceof CommandParseError) {
+        return `Invalid command: ${error.message}. Quote arguments that contain spaces with matching "..." or '...' quotes.`;
+      }
+      throw error;
+    }
+
+    try {
+      const result = await executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {

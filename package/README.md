@@ -1018,6 +1018,14 @@ User Doe, Jane from the tool
 | `command` | The aux4 command to run (e.g., `print-name --firstName John --lastName Doe`) |
 | `cwd` | Working directory for the command. Defaults to the current directory. |
 
+**No shell is involved.** `aux4` is spawned directly with the command string split into
+arguments using POSIX-style quoting (`'...'` literal, `"..."` allows only `\"`/`\\`
+escapes). Nothing is ever expanded — `$VAR`, `` `...` ``, `$()`, globs and `~` are passed
+through exactly as written, so a value like `$482.50` or a URL with `&` reaches the command
+unchanged. An unquoted `;`, `|`, `&&`, `||`, `>` or `<` standing as its own word is rejected
+with an error (it would mean shell chaining, which does not run here); the same characters
+inside a quoted or larger argument are plain text.
+
 Letting the agent invoke the tool:
 The agent can use the executeAux4 integration to run local commands during a response:
 
