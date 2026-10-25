@@ -1,4 +1,5 @@
 import fs from "fs";
+import { repeatFixHint } from "./LoopHint.js";
 import path from "path";
 import os from "os";
 import { spawn, spawnSync } from "child_process";
@@ -1567,9 +1568,10 @@ function wrapWithLoopDetection(name, underlyingTool) {
         }
 
         const sample = String(prior.result).slice(0, 200);
+        const fix = repeatFixHint(prior.result);
         return `Not run: you have already made this exact call ${prior.count} times and it returned`
           + ` the same result every time:\n${sample}\n\nRepeating it will not change anything.`
-          + ` Read the current state and take a different route, or stop and report what is blocking you.`;
+          + (fix ? ` ${fix}` : ` Read the current state and take a different route, or stop and report what is blocking you.`);
       }
 
       const result = await underlyingTool.invoke(args);

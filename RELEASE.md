@@ -1,3 +1,13 @@
+# Release 1.2.7
+
+## Fixes
+
+- When an identical call is refused because it already failed the same way twice, and the
+  failure is aux4's own parameter error (`Missing required parameter --X`, or
+  `Unknown parameter --a, did you mean --b?`), the refusal now names the fix ("the call needs
+  --messageId <value> ... rename that flag") instead of only "take a different route". Seen in
+  dojo: a small model read the plain refusal and wandered off instead of changing the flag.
+
 # Release 1.2.6
 
 ## Features
