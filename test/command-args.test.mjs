@@ -64,3 +64,10 @@ test("buildAux4Argv allows the same characters quoted or embedded in a word", ()
   assert.deepEqual(buildAux4Argv("x --url http://h/p?a=1&b=2"), ["x", "--url", "http://h/p?a=1&b=2"]);
   assert.deepEqual(buildAux4Argv("x a;b"), ["x", "a;b"]);
 });
+
+test("buildAux4Argv drops a duplicated aux4 binary name", () => {
+  assert.deepEqual(buildAux4Argv("aux4 aux4 version"), ["aux4", "version"]);
+  assert.deepEqual(buildAux4Argv("aux4 version"), ["aux4", "version"]);
+  assert.deepEqual(buildAux4Argv("aux4 pkger list"), ["aux4", "pkger", "list"]);
+  assert.deepEqual(buildAux4Argv("'aux4' aux4 version"), ["aux4", "aux4", "version"]);
+});

@@ -138,5 +138,11 @@ export function buildAux4Argv(command) {
       `unquoted "${op}" is not supported — executeAux4 runs a single aux4 command with no shell, so chaining/redirection operators do nothing. Quote it ('...' or "...") if you meant it literally, or make one executeAux4 call per command`
     );
   }
+  // A model that writes the full command line ("aux4 aux4 version", copied from a
+  // task or a doc) means the `aux4` binary itself: `aux4 aux4 aux4 ...` is never a
+  // real command, so drop the duplicated binary name.
+  if (tokens.length >= 2 && !tokens[0].quoted && tokens[0].value === "aux4" && !tokens[1].quoted && tokens[1].value === "aux4") {
+    tokens.shift();
+  }
   return tokens.map((t) => t.value);
 }

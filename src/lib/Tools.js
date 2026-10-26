@@ -510,6 +510,22 @@ function formatTimeoutMessage(command, timeout, error) {
   return lines.join("\n");
 }
 
+// `aux4 <command>` with a leading `aux4` the model added itself ("aux4 google gmail
+// list") runs as `aux4 aux4 google ...` and fails with "Command not found". Nothing ran,
+// so retry once without that word -- the command the model meant.
+async function executeAux4Argv(command, { argv, stdin, timeout, cwd }) {
+  try {
+    return await executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
+  } catch (error) {
+    const notFound = !error.timedOut && /^Command not found/.test(String(error.message || "").trim());
+    if (notFound && argv.length > 1 && argv[0] === "aux4") {
+      const rest = argv.slice(1);
+      return await executeWithTimeout(`aux4 ${rest.join(" ")}`, { argv: rest, stdin, timeout, cwd });
+    }
+    throw error;
+  }
+}
+
 export const executeAux4CliTool = tool(
   async ({ command, stdin, timeout, cwd }) => {
     // Check system-level deny first (cannot be overridden)
@@ -530,7 +546,7 @@ export const executeAux4CliTool = tool(
     }
 
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
+      const result = await executeAux4Argv(command, { argv, stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -658,7 +674,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const result = await executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
+      const result = await executeAux4Argv(command, { argv, stdin, timeout, cwd });
       return result;
     } catch (error) {
       if (error.timedOut) {

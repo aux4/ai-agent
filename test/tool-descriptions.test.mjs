@@ -10,10 +10,13 @@ import * as Descriptions from "../src/docs/tools/descriptions.js";
 // small. These are the markdown "user manuals" HARN-032 replaced with short, model-facing text --
 // this guards against someone pasting a long doc back into a description.
 const TOTAL_BUDGET = 8000;
-const PER_TOOL_BUDGET = 1500; // generous ceiling per tool; executeAux4 is the longest by design
+const PER_TOOL_BUDGET = 1500; // generous ceiling per tool
+// executeAux4 deliberately keeps its full doc as its description (see descriptions.js).
+const FULL_DOC_TOOLS = new Set(["executeAux4Desc"]);
 
 test("every short tool description stays well under the per-tool budget", () => {
   for (const [name, desc] of Object.entries(Descriptions)) {
+    if (FULL_DOC_TOOLS.has(name)) continue;
     assert.ok(typeof desc === "string" && desc.length > 0, `${name} should be a non-empty string`);
     assert.ok(
       desc.length <= PER_TOOL_BUDGET,
@@ -84,4 +87,9 @@ test("a non-existent references/skills/storage path (e.g. the CLI's own defaults
   assert.equal(tools.searchContext, undefined);
   assert.equal(tools.readReference, undefined);
   assert.equal(tools.readSkill, undefined);
+});
+
+test("executeAux4's description is its full doc, verbatim", () => {
+  const doc = fs.readFileSync(new URL("../src/docs/tools/executeAux4.md", import.meta.url), "utf8");
+  assert.equal(Descriptions.executeAux4Desc, doc);
 });
