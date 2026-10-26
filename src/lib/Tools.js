@@ -10,6 +10,7 @@ import LlmStore from "./LlmStore.js";
 import { getEmbeddings } from "./Embeddings.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
 import { buildAux4Argv, CommandParseError } from "./CommandArgs.js";
+import { loadHooks, wrapWithHooks } from "./Hooks.js";
 
 // Import tool descriptions
 import readFileDesc from "../docs/tools/readFile.md?raw";
@@ -1618,7 +1619,7 @@ function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
 }
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage } = config;
+  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage, hooksFile, request, historyFile, session } = config;
 
   const base = {
     readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
@@ -1649,6 +1650,17 @@ export function createTools(config = {}) {
   // consequential ones.
   for (const name of Object.keys(base)) {
     base[name] = wrapWithLoopDetection(name, base[name]);
+  }
+
+  // Hooks are the outermost wrap: a caller gets to check (and block) a call before
+  // anything else -- policy, loop detection, the real tool -- ever sees it, matching
+  // aux4 core's before-hook-runs-first contract.
+  const hooks = hooksFile ? loadHooks(hooksFile) : [];
+  if (hooks.length > 0) {
+    const hooksContext = { hooks, request, historyFile, session };
+    for (const name of Object.keys(base)) {
+      base[name] = wrapWithHooks(name, base[name], hooksContext);
+    }
   }
 
   return base;

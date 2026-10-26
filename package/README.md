@@ -520,6 +520,82 @@ Two safeguards run on every turn, independent of any tool policy configuration:
   reached 624 calls before this guard existed). A call whose arguments change, or whose result
   changes (e.g. legitimate polling), is never blocked.
 
+## Tool-Call Hooks
+
+`--hooks <file>` lets a caller check (and block, stub, or observe) any tool call **before it
+runs, inside the round** — following aux4 core's own hook standard (the same `hooks` array
+shape a package declares in its own `.aux4` file; see `aux4 aux4 man aux4__hooks`), applied at
+the granularity of a single tool call.
+
+```yaml
+# hooks.json
+{
+  "hooks": [
+    {
+      "tool": "executeAux4",
+      "command": "agent:browser/run",
+      "params": { "field": "confirm=yes" },
+      "order": 0,
+      "before": [
+        "aux4 agent check-values --request \"${__request}\" --history \"${__history}\""
+      ]
+    }
+  ]
+}
+```
+
+```bash
+aux4 ai agent ask --config --hooks hooks.json "Submit the order"
+```
+
+Each hook entry:
+
+- **`tool`** — which tool it targets: `executeAux4`, `writeFile`, `editFile`, `removeFiles`,
+  `createDirectory`, `saveImage`, or any other built-in tool by name. Defaults to `executeAux4`.
+- **`command`** — for `executeAux4` only — a `<profile>/<command>` pattern, e.g.
+  `agent:browser/run`. `*` matches any single segment (`*/run`, `agent:browser/*`, `*/*`). The
+  path is resolved from the model's command string the way aux4 itself resolves it
+  (`aux4 <action words> --whereIsIt`) — never guessed from the string, so it is correct for any
+  installed package.
+- **`params`** — a match filter on the call's own params: for `executeAux4`, parsed from the
+  command string the way aux4 would parse `--name value` / `--name=value` pairs; for every other
+  tool, the tool's own arguments object. `"a|b"` matches either value; a missing param never
+  matches; a repeated flag (e.g. two `--field` values on one call) matches if **any** of its
+  values match.
+- **`order`** — lower runs first (default `0`); ties keep declaration order.
+- **`before`** / **`replace`** / **`after`** / **`error`** — aux4 execute steps, run by aux4
+  itself (a scratch one-command package under the hood, not a reimplemented mini-language); the
+  `profile:` and `stdin:` executors are blocked in a hook step, same as core.
+
+Phase semantics:
+
+- **`before`** — runs first. A failing step (non-zero exit, a crash, or a timeout) blocks the
+  call: it never runs, and the model gets the step's own output back as that call's result,
+  prefixed `Blocked by hook: `.
+- **`replace`** — stands in for the call entirely: its own output becomes the result, and the
+  real tool never runs.
+- **`after`** — runs once the call (or its replacement) succeeds. Best-effort, with one
+  documented exception: a successful `after` step that prints non-empty stdout **replaces** the
+  result (core's own `set:response=...` mechanism has no equivalent on a plain function return
+  value, so this is the explicit substitute; a step that prints nothing leaves the result
+  untouched).
+- **`error`** — runs when the call throws. Best-effort; never changes the thrown error.
+
+Every step gets the call's own params interpolated as `${var}`, plus:
+
+| Variable | Meaning |
+|---|---|
+| `${__tool}` | The tool name |
+| `${__command}` | `<profile>/<command>` (executeAux4 only) |
+| `${__request}` | This round's user request |
+| `${__history}` | The `--history` file path — a hook can read prior tool results from it |
+| `${__session}` | A session identifier |
+| `${__response}` | (`after` only) The result that would otherwise be returned |
+| `${__error}` / `${__exitCode}` | (`error` only) The thrown error's message / `1` |
+
+With no `--hooks`, behavior is completely unchanged. `chat` accepts the same flag and passes it
+through to `ask` on every turn.
+
 ## Model Selection
 
 The agent supports a named model registry so you can define multiple models and select one by name with `--useModel` instead of passing inline model JSON every time.

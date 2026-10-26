@@ -9,7 +9,7 @@ Pass `--bio` (a JSON object with `name`, `role`, `description`) to give the agen
 #### Usage
 
 ```bash
-aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <text>
+aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--model <json>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--hooks <file>] <text>
 ```
 
 --instructions   Prompt instructions file (default: AGENTS.md; falls back to AGENT.md then instructions.md if not found)
@@ -28,6 +28,7 @@ aux4 ai agent chat [--instructions <file>] [--bio <json>] [--role <role>] [--his
 --useModel       Named model from registry to use for this request (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: skills)
+--hooks          Path to a tool-call hooks file, passed through to ask on every turn (default: "") -- see `aux4 aux4 man ai_agent__ask`
 text             Initial text to send (positional argument)
 
 #### Example

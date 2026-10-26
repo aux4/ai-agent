@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.2.7",
+  "version": "1.3.0",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -131,7 +131,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs) --packageDir ${packageDir}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs) --packageDir ${packageDir} --hooks ${hooks}"
           ],
           "help": {
             "text": "Ask your question",
@@ -242,6 +242,11 @@
                 "default": "{}"
               },
               {
+                "name": "hooks",
+                "text": "Path to a hooks file ({\"hooks\":[...]}) that follows aux4 core's hook standard -- before/replace/after/error steps matched by tool and (for executeAux4) command path, run before/instead of/after a tool call",
+                "default": ""
+              },
+              {
                 "name": "question",
                 "text": "The question to ask",
                 "arg": true
@@ -307,8 +312,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references, skills)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, hooks)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references, skills, hooks)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -397,6 +402,11 @@
                 "name": "skills",
                 "text": "Path to the skills directory",
                 "default": ".agents/skills"
+              },
+              {
+                "name": "hooks",
+                "text": "Path to a hooks file ({\"hooks\":[...]}) that follows aux4 core's hook standard -- passed through to ask",
+                "default": ""
               },
               {
                 "name": "text",

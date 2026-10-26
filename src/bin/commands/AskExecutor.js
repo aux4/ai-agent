@@ -78,6 +78,12 @@ export async function askExecutor(params) {
     if (skills) {
       toolsConfig.skills = skills;
     }
+    if (params.hooks) {
+      toolsConfig.hooksFile = params.hooks;
+      toolsConfig.request = question;
+      toolsConfig.historyFile = history || "";
+      toolsConfig.session = history || params.runId || "session";
+    }
 
     const prompt = new Prompt(model, toolsConfig, { compaction, policy });
     await prompt.init();

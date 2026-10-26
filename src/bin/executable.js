@@ -99,7 +99,8 @@ function parsePolicyArg(value) {
         policy: parsePolicyArg(args[20]),
         runId: args[21] || "",
         costs: JSON.parse(args[22] || "{}"),
-        packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : ""
+        packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : "",
+        hooks: args.indexOf("--hooks") !== -1 ? args[args.indexOf("--hooks") + 1] : ""
       });
     } else if (command === "image") {
       await imageExecutor({

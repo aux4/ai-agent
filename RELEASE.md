@@ -1,3 +1,30 @@
+# Release 1.3.0
+
+## Features
+
+- **Tool-call hooks that follow aux4 core's own hook standard (HARN-030).** `ask`/`chat` now
+  accept `--hooks <file>`, a `{ "hooks": [...] }` file in the exact same shape as a package's
+  own `hooks` array (`core/core.go` `Hook`): `command` pattern matching (`<profile>/<command>`,
+  `*` per-segment wildcard, resolved via `aux4 <action> --whereIsIt` the way aux4 itself
+  resolves it — never string-prefix guessing), a `params` match filter (`|` alternatives,
+  missing param never matches, and — since a tool call can repeat a flag — a repeatable value
+  matches if ANY of its values match), `order`, and `before`/`replace`/`after`/`error` phases.
+  Each hook additionally names the tool it targets (`"tool": "executeAux4"` by default, or any
+  other built-in tool by name — `writeFile`, `removeFiles`, ...). Steps are real aux4 execute
+  steps, run by aux4 itself (a scratch one-command package, not a reimplemented mini-language);
+  the same `profile:`/`stdin:` executors are blocked in a hook step. A failing `before` step
+  blocks the call before it ever runs, returning its own message to the model as that call's
+  result ("Blocked by hook: ..."); a `replace` hook substitutes its own output for the call
+  entirely; `after`/`error` are best-effort observers that fire once the call (or its
+  replacement) is decided, with one documented exception — a successful `after` step that
+  prints non-empty stdout replaces the result (core's own `set:response=...` has no equivalent
+  on a plain function return value, so this is the explicit substitute). Every call also gets
+  `__tool`, `__command`, `__request` (this round's user request), `__history` (the history
+  file, so a hook can read prior tool results) and `__session`, interpolated into hook steps
+  as `${var}` exactly like a command's own declared variables. First consumer: agent/agent's
+  value-provenance check runs as a `before` hook on `agent:browser/run` whenever a `--field`
+  carries `confirm=yes`, replacing its own two-round confirmation gate.
+
 # Release 1.2.7
 
 ## Fixes

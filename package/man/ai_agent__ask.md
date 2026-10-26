@@ -18,11 +18,12 @@ Key features:
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
+- **Tool-call hooks** — check or stub any tool call before it runs with `--hooks <file>`, following aux4 core's own hook standard (see below)
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--hooks <file>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -45,6 +46,7 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: skills)
+--hooks          Path to a hooks file (default: "") -- see "Tool-call hooks" below
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -64,6 +66,18 @@ Compaction config fields:
 **Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).
 
 **Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand using the `readSkill` tool. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
+
+**Tool-call hooks (`--hooks`):** Point at a JSON file shaped `{ "hooks": [...] }` — the exact same shape as a package's own top-level `hooks` array (see `aux4 aux4 man aux4__hooks` for the core contract this follows). Each hook:
+
+- `tool` — which tool it targets (`executeAux4`, `writeFile`, `removeFiles`, ...). Defaults to `executeAux4`.
+- `command` — for `executeAux4` only: a `<profile>/<command>` pattern (e.g. `agent:browser/run`), `*` matches any single segment. Resolved from the model's command string the way aux4 itself resolves it (`aux4 <action> --whereIsIt`), never guessed from the string.
+- `params` — a match filter on the call's own params (parsed the way aux4 would parse `--name value` pairs for `executeAux4`; the tool's own arguments object for every other tool). `"|"` separates alternatives; a missing param never matches; a repeated flag (e.g. two `--field` values) matches if ANY of its values match.
+- `order` — lower runs first (default 0); ties broken by declaration order.
+- `before` / `replace` / `after` / `error` — aux4 execute steps (run by aux4 itself; `profile:`/`stdin:` are blocked, same as core). A failing `before` step blocks the call — the model never sees it run, and gets the step's own output back as the result, prefixed `Blocked by hook: `. A `replace` hook substitutes its own output for the call entirely. `after` fires once a call succeeds, `error` once it throws; both are best-effort, except: a successful `after` step with non-empty stdout replaces the result.
+
+Every step gets `${__tool}`, `${__command}`, `${__request}` (this round's user request), `${__history}` (the `--history` file, so a hook can read prior tool results), `${__session}`, and the call's own params, interpolated exactly like a command's own declared variables. `after`/`error` steps additionally get `${__response}` / `${__error}` / `${__exitCode}`.
+
+With no `--hooks`, behavior is unchanged.
 
 #### Example
 
@@ -154,3 +168,27 @@ With Codex (ChatGPT subscription, no API key needed):
 ```bash
 aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "What time is it?"
 ```
+
+With a tool-call hook (block a browser form submission that carries a made-up value):
+
+`hooks.json`:
+
+```json
+{
+  "hooks": [
+    {
+      "command": "agent:browser/run",
+      "params": { "field": "confirm=yes" },
+      "before": [
+        "aux4 agent check-values --request \"${__request}\" --history \"${__history}\""
+      ]
+    }
+  ]
+}
+```
+
+```bash
+aux4 ai agent ask --config --hooks hooks.json "Submit the order with employee id 12345"
+```
+
+If `aux4 agent check-values` exits non-zero (the id was never sourced from the request or an earlier tool result), the submission never runs and the model sees the check's own message instead.
