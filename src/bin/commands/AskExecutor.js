@@ -69,6 +69,9 @@ export async function askExecutor(params) {
 
     // Create tools configuration
     const toolsConfig = storage ? { storage } : {};
+    if (params.embeddings && typeof params.embeddings === "object" && Object.keys(params.embeddings).length > 0) {
+      toolsConfig.embeddingsConfig = params.embeddings;
+    }
     if (permissions && typeof permissions === "object" && Object.keys(permissions).length > 0) {
       toolsConfig.permissions = permissions;
     }

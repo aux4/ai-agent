@@ -61,6 +61,7 @@ Key variables (from the package help):
 - policy (default: "") — optional guardrail policy as an inline object with `budget`/`allow`/`deny`/`escalate`, delivered as JSON (see [Policy Guardrails](#policy-guardrails)).
 - runId (default: "") — optional run identifier injected into escalation commands as `${runId}`; auto-generated when empty.
 - costs (default: "{}") — optional cost rates as JSON (`costIn`, `costOut`, `costCache` per 1M tokens) used for the policy `usd` budget.
+- embeddings (default: "{}") — embeddings provider configuration as JSON for the `searchContext` tool; resolves to type `local` when omitted. Must match what `--storage` was learned with (see [Embeddings](#embeddings)).
 - models (default: "{}") — models registry as JSON (see [Model Selection](#model-selection)).
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
@@ -340,6 +341,7 @@ Key variables:
 - storage (default: .context) — the storage directory to write vector store and metadata.
 - doc (arg: true) — file path to the document to learn from.
 - type (default: "") — optional document type.
+- embeddings (default: "{}") — embeddings provider configuration as JSON; resolves to type `local` when omitted. See [Embeddings](#embeddings) below.
 
 Example:
 Create simple document files then learn them.
@@ -400,6 +402,7 @@ Key variables:
 - format (default: text) — "text" or "json"
 - source (default: "") — limit search to a specific source path
 - limit (default: "1") — number of results to return
+- embeddings (default: "{}") — embeddings provider configuration as JSON; must match what `--storage` was learned with. See [Embeddings](#embeddings) below.
 - query (arg: true) — the search query
 
 Usage example:
@@ -422,6 +425,7 @@ Remove the local vector store files to forget learned documents. This is handy i
 
 Key variables:
 - storage (default: .context)
+- embeddings (default: "{}") — embeddings provider configuration as JSON; only needed (and checked) when forgetting a specific document, since loading the store to remove just its vectors needs a matching provider. Ignored when forgetting everything. See [Embeddings](#embeddings) below.
 
 Usage:
 
@@ -432,6 +436,39 @@ aux4 ai agent forget
 This deletes the vector store artifacts in the storage directory and subsequent searches will report that no documents are indexed.
 
 For more details see [aux4 ai agent forget](./commands/ai/agent/forget).
+
+### Embeddings
+
+`learn`, `search`, `forget`, and the `searchContext` tool used by `ask` all accept an `--embeddings` flag to select the embeddings provider:
+
+```bash
+aux4 ai agent learn ./docs/ --embeddings '{"type":"local","config":{"dimension":768}}'
+```
+
+| Type | Provider | Requires |
+|------|----------|----------|
+| `local` (default) | [aux4/embedding](https://hub.aux4.io) — Google's EmbeddingGemma 2, running locally on CPU | nothing — no API key, no network after the model is cached. Install with `aux4 aux4 pkger install aux4/embedding` |
+| `openai` | OpenAI embeddings API | `OPENAI_API_KEY` |
+| `bedrock` | AWS Bedrock | AWS credentials |
+| `cohere` | Cohere API | `COHERE_API_KEY` |
+| `databricks` | Databricks serving endpoint | `DATABRICKS_HOST` / `DATABRICKS_API_KEY` |
+| `mistral` | Mistral API | `MISTRAL_API_KEY` |
+| `ollama` | Local Ollama server | a running Ollama instance |
+| `vertex` | Google Vertex AI | Google Cloud credentials |
+
+`local` accepts `modalities` (`text`/`full`), `dimension` (`768`/`512`/`256`/`128`), `dtype`, `cacheDir`, `device`, and `batchSize` in its `config` — see the [aux4/embedding](https://hub.aux4.io) package for details. Other types accept whatever their LangChain provider accepts in `config` (e.g. `{"model": "text-embedding-3-small"}` for `openai`).
+
+**Store guard:** a store remembers which embeddings type/config it was built with. Learning, searching, or forgetting a specific document with a *different* embeddings configuration than the store already contains fails with a clear error instead of silently mixing incompatible vectors:
+
+```text
+Embeddings mismatch: the store at '.context' was indexed with embeddings type 'local', but the
+current configuration uses type 'openai'. Mixing embeddings from different models/configs in the
+same store produces incompatible vectors. Run 'aux4 ai agent forget --storage .context' to clear
+the store, then re-run 'aux4 ai agent learn --storage .context' with the new embeddings
+configuration.
+```
+
+Stores created before this guard existed have no recorded configuration and are treated as type `openai` (the only type that existed at the time) for compatibility checks.
 
 ---
 

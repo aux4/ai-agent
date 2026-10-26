@@ -2,18 +2,21 @@
 
 Search queries over the agent's learned documents and return the most relevant matches from the local vector store. The command looks up the provided query in the specified storage directory, optionally filters by a source file path, and returns up to the requested number of results. Output can be returned as plain text (default) or as JSON for programmatic consumption. If no documents have been indexed yet the command returns an error asking you to add documents using the learn command.
 
+`--embeddings` must match whatever configuration the store was learned with (default type: `local`, offline, no API key). Searching with a different type or config than the store was built with fails with a clear error instead of returning meaningless results — see `aux4 ai agent learn` for the full explanation and the fix (forget + re-learn).
+
 #### Usage
 
 Describe the main parameters and options of the command.
 
 ```bash
-aux4 ai agent search [--storage <path>] [--format <text|json>] [--source <file-path>] [--limit <n>] <query>
+aux4 ai agent search [--storage <path>] [--format <text|json>] [--source <file-path>] [--limit <n>] [--embeddings <json>] <query>
 ```
 
 - storage: The storage directory containing the vector store (default: .context).
 - format: Output format, either text (default) or json.
 - source: Optional source file path to limit results to a specific document.
 - limit: Number of results to return (default: 1).
+- embeddings: Embeddings configuration as JSON, `{"type": "...", "config": {...}}` (default: `{}`, which resolves to type `local`). Must match what the store was learned with.
 - query: The search query (can be provided as a positional argument).
 
 #### Example

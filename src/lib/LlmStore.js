@@ -95,10 +95,15 @@ export default class LlmStore {
     }
 
     if (!this.store) {
-      this.store = await FaissStore.fromDocuments(chunks, this.embeddings, { ids: chunkIds });
-    } else {
-      await this.store.addDocuments(chunks, { ids: chunkIds });
+      // NOTE: FaissStore.fromDocuments() does NOT forward its dbConfig.ids option down to
+      // addDocuments/addVectors (library bug), so the very first document ever added to a
+      // fresh store would silently get a random uuid instead of our tracked chunk id -- making
+      // that document's chunks un-deletable/un-replaceable later (forget/re-learn would silently
+      // no-op on it). Constructing the empty store ourselves and always calling addDocuments()
+      // (which DOES forward ids) avoids the broken path entirely.
+      this.store = new FaissStore(this.embeddings, {});
     }
+    await this.store.addDocuments(chunks, { ids: chunkIds });
 
     idsMap[docPath] = {
       md5,

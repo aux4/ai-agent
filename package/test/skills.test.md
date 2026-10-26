@@ -4,14 +4,14 @@ These tests make live LLM calls. They are skipped when no LLM credentials are
 present (CI); they run for real when `OPENAI_API_KEY` (or `AUX4_TEST_LLM`) is set.
 
 ```beforeAll
-mkdir -p skills/secret-code
+mkdir -p .agents/skills/secret-code
 ```
 
 ```afterAll
-rm -rf skills
+rm -rf .agents
 ```
 
-```file:skills/secret-code/SKILL.md
+```file:.agents/skills/secret-code/SKILL.md
 ---
 name: secret-code
 description: Returns the secret code for the current project
