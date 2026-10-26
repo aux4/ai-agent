@@ -20,6 +20,7 @@ Key features:
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
 - **Tool-call hooks** — check or stub any tool call before it runs with `--hooks <file>`, following aux4 core's own hook standard (see below)
 - **searchContext embeddings** — the `searchContext` tool (document retrieval against `--storage`) uses `--embeddings` to pick its embeddings provider/config; default type is `local` (offline, no API key). Must match what `--storage` was learned with
+- **Tools are bound only when configured** — `searchContext`, `readReference`, and `readSkill` are given to the model only when `--storage` already has an indexed store, `--references` has at least one `.md` file, or `--skills` has at least one skill, respectively; otherwise they're left out entirely rather than bound as a no-op
 
 #### Usage
 

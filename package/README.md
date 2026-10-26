@@ -746,24 +746,26 @@ aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "
 
 ## Built-in Tools
 
-The agent comes with a set of built-in tools that the LLM can call during execution. These tools run locally and are always available:
+The agent comes with a set of built-in tools that the LLM can call during execution. These tools run locally. Each tool's `description` (what the model sees) is kept short and task-focused; a longer human-readable reference for each tool lives under `src/docs/tools/*.md` in the package source.
 
-| Tool | Description |
-|------|-------------|
-| `readFile` | Read the contents of a text file |
-| `writeFile` | Create or overwrite a file |
-| `editFile` | Perform partial string replacements in a file |
-| `listFiles` | List files in a directory |
-| `searchFiles` | Search file contents for a text pattern |
-| `createDirectory` | Create a new directory |
-| `removeFiles` | Remove files or directories created by the agent |
-| `saveImage` | Save a base64-encoded image to disk |
-| `executeAux4` | Run any aux4 command |
-| `searchContext` | Query the local vector store for relevant context |
-| `askUser` | Ask the user a question and wait for their typed response |
-| `currentDateTime` | Get the current date and time in local and UTC formats |
-| `readReference` | List or read reference documents from the references directory |
-| `readSkill` | List or read skill definitions from the skills directory |
+| Tool | Description | Always bound? |
+|------|-------------|----------------|
+| `readFile` | Read the contents of a text file | Yes |
+| `writeFile` | Create or overwrite a file | Yes |
+| `editFile` | Perform partial string replacements in a file | Yes |
+| `listFiles` | List files in a directory | Yes |
+| `searchFiles` | Search file contents for a text pattern | Yes |
+| `createDirectory` | Create a new directory | Yes |
+| `removeFiles` | Remove files or directories created by the agent | Yes |
+| `saveImage` | Save a base64-encoded image to disk | Yes |
+| `executeAux4` | Run any aux4 command | Yes |
+| `askUser` | Ask the user a question and wait for their typed response | Yes |
+| `currentDateTime` | Get the current date and time in local and UTC formats | Yes |
+| `searchContext` | Query the local vector store for relevant context | Only when `--storage` points at a directory that actually has an indexed store (i.e. something has been `learn`ed into it) |
+| `readReference` | List or read reference documents from the references directory | Only when the references directory contains at least one `.md` file |
+| `readSkill` | List or read skill definitions from the skills directory | Only when the skills directory contains at least one skill (a subdirectory with `SKILL.md`) |
+
+**Note:** `searchContext`, `readReference`, and `readSkill` are only given to the model when their backing resource actually exists — an unconfigured tool would only ever answer "not configured" or "not found", which costs prompt tokens without adding any capability. This is checked automatically; there is nothing to opt into.
 
 ### askUser
 

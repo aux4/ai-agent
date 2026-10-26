@@ -1,3 +1,44 @@
+# Release 1.3.1
+
+## Fixes
+
+- **Short, model-facing tool descriptions (HARN-032).** Every built-in tool's `description` --
+  the text actually sent to the model on every call -- was previously the full human-readable
+  markdown doc from `src/docs/tools/*.md` (parameter tables duplicating the zod schema,
+  emoji "when to use" lists, response-status tables, implementation details like `fs.rmSync`),
+  roughly 50KB / ~13K tokens across 14 tools. Descriptions are now short (2-6 sentences, under
+  ~600 chars; `executeAux4` a bit longer since its quoting rules matter) and live in
+  `src/docs/tools/descriptions.js`. The long docs in `src/docs/tools/*.md` are unchanged and
+  still linked from the README/man pages as human documentation -- they are just never loaded
+  into the prompt anymore. Behavior and tool names are unchanged.
+- **Tools are only bound when their backing resource is actually configured.** `createTools()`
+  previously always bound `searchContext`, `readReference`, and `readSkill` even when no vector
+  store, references directory, or skills directory existed -- costing prompt tokens for a tool
+  that could only ever reply "not configured". Each is now bound only when its resource is real:
+  `searchContext` when the storage directory has an actual `docstore.json` (the same marker
+  `LlmStore.load()` checks -- the CLI's own `--storage .context` default is NOT "configured"
+  until something has been learned into it), `readReference` when the references directory
+  contains at least one `.md` file, `readSkill` when the skills directory has at least one
+  `SKILL.md`. The skills-catalog instructions text already behaved this way (`loadSkillsCatalog`
+  returns nothing when there are no skills); this just brings the tool binding itself in line.
+- Merged in the `local` embeddings type (aux4/embedding, default) from a parallel branch
+  (EMB-003/1.2.4-1.2.5) -- see the entry below. Resolved the overlap with the hooks/tool-binding
+  work in this release: `searchContext` is bound (or not) independently of which embeddings
+  type the store was learned with.
+
+# Release 1.2.5 / 1.2.4
+
+## Features
+
+- **Local embeddings by default (`aux4/embedding`, EmbeddingGemma).** `searchContext` and the
+  `learn`/`search`/`forget` commands pick their embeddings provider via `--embeddings`
+  (`{"type": "...", "config": {...}}`); the default type is now `local` -- offline, no API key,
+  backed by `aux4/embedding`'s `embed` command -- instead of assuming OpenAI. A store remembers
+  the embeddings type/config it was learned with (`.context/ids.json`'s `__embeddingsMeta__`);
+  a mismatched `--embeddings` on a later `learn`/`search`/`forget` call against the same store is
+  rejected with a clear "Embeddings mismatch" error rather than silently producing nonsense
+  results.
+
 # Release 1.3.0
 
 ## Features

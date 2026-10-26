@@ -12,22 +12,27 @@ import { ensureCompatibleEmbeddings } from "./EmbeddingsGuard.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
 import { buildAux4Argv, CommandParseError } from "./CommandArgs.js";
 import { loadHooks, wrapWithHooks } from "./Hooks.js";
+import { hasConfiguredStorage, hasReferences, hasSkills } from "./ToolBindings.js";
 
-// Import tool descriptions
-import readFileDesc from "../docs/tools/readFile.md?raw";
-import writeFileDesc from "../docs/tools/writeFile.md?raw";
-import editFileDesc from "../docs/tools/editFile.md?raw";
-import listFilesDesc from "../docs/tools/listFiles.md?raw";
-import createDirectoryDesc from "../docs/tools/createDirectory.md?raw";
-import executeAux4Desc from "../docs/tools/executeAux4.md?raw";
-import saveImageDesc from "../docs/tools/saveImage.md?raw";
-import removeFilesDesc from "../docs/tools/removeFiles.md?raw";
-import searchContextDesc from "../docs/tools/searchContext.md?raw";
-import searchFilesDesc from "../docs/tools/searchFiles.md?raw";
-import askUserDesc from "../docs/tools/askUser.md?raw";
-import currentDateTimeDesc from "../docs/tools/currentDateTime.md?raw";
-import readReferenceDesc from "../docs/tools/readReference.md?raw";
-import readSkillDesc from "../docs/tools/readSkill.md?raw";
+// Short, model-facing tool descriptions -- what actually gets sent to the LLM on every call.
+// The long human-readable docs live in ../docs/tools/*.md (linked from README/man pages) and
+// are never loaded here; see ../docs/tools/descriptions.js for the full rationale.
+import {
+  readFileDesc,
+  writeFileDesc,
+  editFileDesc,
+  listFilesDesc,
+  createDirectoryDesc,
+  executeAux4Desc,
+  saveImageDesc,
+  removeFilesDesc,
+  searchContextDesc,
+  searchFilesDesc,
+  askUserDesc,
+  currentDateTimeDesc,
+  readReferenceDesc,
+  readSkillDesc
+} from "../docs/tools/descriptions.js";
 import { listSkills } from "./Skills.js";
 
 // Array to track files and directories created by the agent
@@ -1641,12 +1646,23 @@ export function createTools(config = {}) {
     createDirectory: createDirectoryTool,
     removeFiles: permissions ? createRemoveFilesTool(permissions) : removeFilesTool,
     executeAux4: permissions ? createExecuteAux4Tool(permissions) : executeAux4CliTool,
-    searchContext: createSearchContextTool(storage, embeddingsConfig),
     askUser: createAskUserTool(),
-    currentDateTime: currentDateTimeTool,
-    readReference: createReadReferenceTool(references),
-    readSkill: createReadSkillTool(skills)
+    currentDateTime: currentDateTimeTool
   };
+
+  // Only bind the tools whose backing resource actually exists -- an unbound tool costs
+  // nothing in the prompt, and binding one that always says "not configured"/"not found" just
+  // burns tokens describing a no-op. Each check mirrors the real resource the tool reads from
+  // (LlmStore's docstore.json marker, an actual reference .md file, an actual skill).
+  if (hasConfiguredStorage(storage)) {
+    base.searchContext = createSearchContextTool(storage, embeddingsConfig);
+  }
+  if (hasReferences(references)) {
+    base.readReference = createReadReferenceTool(references);
+  }
+  if (hasSkills(skills)) {
+    base.readSkill = createReadSkillTool(skills);
+  }
 
   if (policy) {
     // Gate only the consequential tools; read-only tools stay exempt.
