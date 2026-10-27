@@ -1,5 +1,15 @@
 # Release 1.3.2
 
+
+## 1.3.3
+
+- A hook that blocks the same command 3 times in one run ends the run (loop abort) with the
+  block reason. Before, a model alternating "call with a made-up value" (blocked) and "call
+  without it" kept going until its budget ran out (65 calls, 12 minutes).
+- The loop guard also tracks a call's shape -- the same tool and command with entered `--field`
+  values and session ids removed -- and the same answer coming back. After 4 identical answers it
+  refuses, then aborts, like an exact repeat. Changing only the values no longer resets it.
+
 ## Fixes
 
 - **`--tools` now actually filters which tools are bound (HARN-036).** `ask`/`chat` have

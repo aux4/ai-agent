@@ -73,3 +73,14 @@ test("applyToolsAllowList: an MCP tool name omitted from a given list is a valid
   assert.equal(result.mcpTools.length, 0);
   assert.ok(result.builtinTools.executeAux4);
 });
+
+import { callShape, resultShape } from "../src/lib/Tools.js";
+
+test("callShape ignores entered values and session ids, keeps the action", () => {
+  const a = callShape("executeAux4", { command: "agent browser run --session 'ff8e1d4b' --goal 'Find x' --field 'Employee id=12345'" });
+  const b = callShape("executeAux4", { command: "agent browser run --session 'aa11bb22' --goal 'Find x' --field \"Employee id=999\"" });
+  const c = callShape("executeAux4", { command: "agent browser run --session 'aa11bb22' --goal 'Find y' --field 'Employee id=999'" });
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  assert.equal(resultShape('{"status":"needs-input","session":"ff8e1d4b"}'), resultShape('{"status":"needs-input","session":"aa11bb22"}'));
+});

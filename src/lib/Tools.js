@@ -1566,8 +1566,27 @@ const LOOP_REPEAT_LIMIT = 3;
 // How many refusals of the SAME call before the run is aborted outright.
 const LOOP_ABORT_AFTER = 3;
 
+// The same action with only its entered values changed, getting the same answer back,
+// is also a loop: "--field 'X=a'" then "--field 'X=b'" then no field at all, each told
+// the same thing. Values and volatile ids are dropped from this key.
+const SHAPE_REPEAT_LIMIT = 4;
+export function callShape(name, args) {
+  const cleanArgs = { ...args };
+  delete cleanArgs.__policyCallId;
+  return `${name}:` + JSON.stringify(cleanArgs)
+    .replace(/--field[= ]+(?:'[^']*'|\\"(?:[^"\\]|\\\\.)*?\\"|"(?:[^"\\]|\\.)*"|\S+)/g, "--field <v>")
+    .replace(/--session[= ]+'?[A-Za-z0-9-]+'?/g, "--session <id>");
+}
+export function resultShape(result) {
+  return String(result)
+    .replace(/[0-9a-f]{8,}/gi, "<id>")
+    .replace(/\d{4,}/g, "<n>")
+    .slice(0, 400);
+}
+
 function wrapWithLoopDetection(name, underlyingTool) {
   const seen = new Map();
+  const shapes = new Map();
 
   return tool(
     async (args) => {
@@ -1606,11 +1625,32 @@ function wrapWithLoopDetection(name, underlyingTool) {
           + (fix ? ` ${fix}` : ` Read the current state and take a different route, or stop and report what is blocking you.`);
       }
 
+      const shapeKey = callShape(name, args);
+      const shapePrior = shapes.get(shapeKey);
+      if (shapePrior && shapePrior.count >= SHAPE_REPEAT_LIMIT) {
+        shapePrior.blocked = (shapePrior.blocked || 0) + 1;
+        if (shapePrior.blocked >= LOOP_ABORT_AFTER) {
+          const err = new Error(
+            `Aborting: the same action has returned the same result ${shapePrior.count} times, whatever values were passed. `
+            + `The agent is not making progress. Last result was:\n` + String(shapePrior.result).slice(0, 200)
+          );
+          err.loopAbort = true;
+          throw err;
+        }
+        return `Not run: this action has returned the same result ${shapePrior.count} times, whatever values were passed:\n`
+          + `${String(shapePrior.result).slice(0, 200)}\n\nChanging the values will not change it. `
+          + `If a value it needs cannot be found, stop and say exactly which value is missing.`;
+      }
+
       const result = await underlyingTool.invoke(args);
       const asText = String(result);
       seen.set(key, prior && prior.result === asText
         ? { count: prior.count + 1, result: asText }
         : { count: 1, result: asText });
+      const sig = resultShape(asText);
+      shapes.set(shapeKey, shapePrior && shapePrior.sig === sig
+        ? { count: shapePrior.count + 1, sig, result: asText }
+        : { count: 1, sig, result: asText });
       return result;
     },
     {

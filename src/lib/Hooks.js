@@ -310,6 +310,9 @@ export function isInsideHook() {
 // Wrap a bound LangChain tool so every call is checked against `hooksContext.hooks`
 // before it runs (before/replace), and after it runs (after/error) -- see module header
 // for the full phase contract. Returns the tool unchanged when there are no hooks.
+// After this many blocks of the same command in one run, the run ends.
+export const HOOK_BLOCK_ABORT_AFTER = 3;
+
 export function wrapWithHooks(name, underlyingTool, hooksContext) {
   const hooks = (hooksContext && hooksContext.hooks) || [];
   if (hooks.length === 0) return underlyingTool;
@@ -359,6 +362,18 @@ export function wrapWithHooks(name, underlyingTool, hooksContext) {
           const result = runSteps(hook.before, vars, hook.timeout);
           if (result.exitCode !== 0) {
             const message = result.stdout || result.stderr || `hook exited ${result.exitCode}`;
+            // A model that keeps re-issuing a call the hook blocks (varying its
+            // arguments, so the loop guard never sees an identical call) is stuck:
+            // after a few blocks on the same command, end the run.
+            const blocks = hooksContext.blocks || (hooksContext.blocks = new Map());
+            const blockKey = `${name}:${commandPath || ""}`;
+            const count = (blocks.get(blockKey) || 0) + 1;
+            blocks.set(blockKey, count);
+            if (count >= HOOK_BLOCK_ABORT_AFTER) {
+              const err = new Error(`Aborting: a hook has blocked ${commandPath || name} ${count} times. Last reason:\n${String(message).slice(0, 400)}`);
+              err.loopAbort = true;
+              throw err;
+            }
             return `Blocked by hook: ${message}`;
           }
         }
