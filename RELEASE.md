@@ -4,6 +4,13 @@
 
 
 
+
+## 1.3.7
+
+- A policy deny entry may carry a `reason` (`{"executeAux4": ["browser *"], "reason": "use agent
+  browser run instead"}`); when one of its patterns blocks a call, the agent is told that reason
+  instead of only "Choose another approach". Entries without a reason are unchanged.
+
 ## 1.3.6
 
 - A hook's `__history` is a snapshot of the live conversation written for that hook call,

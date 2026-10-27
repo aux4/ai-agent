@@ -279,3 +279,11 @@ test("a hook's __history is a snapshot of the live conversation, not a stale fil
   assert.equal(read.messages.length, 2);
   assert.equal(liveHistoryFile({ historyFile: stale }), stale);
 });
+
+import { Policy } from "../src/lib/Policy.js";
+
+test("a policy deny entry's reason is told to the agent", () => {
+  const p = Policy.load({ deny: [{ executeAux4: ["browser *"], reason: "use agent browser run instead" }, { executeAux4: ["rm *"] }] });
+  assert.match(p.decide("executeAux4", { command: "browser open --url x" }).reason, /-- use agent browser run instead$/);
+  assert.equal(p.decide("executeAux4", { command: "rm -rf x" }).reason, 'policy denies executeAux4 "rm -rf x"');
+});

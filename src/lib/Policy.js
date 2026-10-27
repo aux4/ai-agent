@@ -36,16 +36,31 @@ function extractPolicy(obj) {
 }
 
 // Convert an allow/deny list ([{tool:[patterns]}, ...]) into a map tool -> [patterns].
+// An entry may carry a "reason" ({executeAux4: [...], reason: "use X instead"}): it is
+// told to the agent when one of that entry's patterns denies a call.
 function indexRules(list) {
   const map = {};
   for (const entry of list || []) {
     if (!entry || typeof entry !== "object") continue;
     for (const [tool, patterns] of Object.entries(entry)) {
+      if (tool === "reason") continue;
       const arr = Array.isArray(patterns) ? patterns : [patterns];
       map[tool] = (map[tool] || []).concat(arr);
     }
   }
   return map;
+}
+
+function indexReasons(list) {
+  const reasons = [];
+  for (const entry of list || []) {
+    if (!entry || typeof entry !== "object" || typeof entry.reason !== "string" || !entry.reason.trim()) continue;
+    for (const [tool, patterns] of Object.entries(entry)) {
+      if (tool === "reason") continue;
+      for (const pattern of (Array.isArray(patterns) ? patterns : [patterns])) reasons.push({ tool, pattern, reason: entry.reason.trim() });
+    }
+  }
+  return reasons;
 }
 
 export class PolicyError extends Error {
@@ -61,6 +76,7 @@ export class Policy {
   constructor(resolved, options = {}) {
     this.allow = indexRules(resolved.allow);
     this.deny = indexRules(resolved.deny);
+    this.denyReasons = indexReasons(resolved.deny);
     this.budget = resolved.budget || {};
     this.escalate = resolved.escalate || [];
     this.staticPermissions = options.staticPermissions || null;
@@ -159,9 +175,10 @@ export class Policy {
 
     // Policy deny — narrows below static permissions.
     if (this.deny[toolName] && this.matchAny(this.deny[toolName], subject)) {
+      const why = (this.denyReasons || []).find(r => r.tool === toolName && this.matchAny([r.pattern], subject));
       return {
         decision: "deny",
-        reason: `policy denies ${toolName} "${subject}"`,
+        reason: `policy denies ${toolName} "${subject}"${why ? ` -- ${why.reason}` : ""}`,
         trigger: "denied_action",
         action,
         spend
