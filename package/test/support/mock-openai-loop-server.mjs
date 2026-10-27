@@ -18,8 +18,9 @@ const BROKEN = "aux4 google gmail get --id msg-ship-9f21";
 const FIXED = "aux4 google gmail get --id msg-ship-9f21 --messageId msg-ship-9f21";
 // A safety cap, not the expected path: the FIRST refusal / FIRST fixed-call success should
 // already end the test. If a regression makes the guard stop refusing, this still bounds the
-// loop so a broken test fails fast instead of hanging.
-const MAX_TURNS = 3;
+// loop so a broken test fails fast instead of hanging. Overridable (4th arg) for tests that
+// need enough rounds for the guard's own LOOP_ABORT_AFTER to fire before this cap would.
+const MAX_TURNS = process.argv[4] ? Number(process.argv[4]) : 3;
 
 function extractText(content) {
   if (typeof content === "string") return content;

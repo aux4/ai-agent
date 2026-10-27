@@ -19,13 +19,14 @@ Key features:
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
 - **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
 - **Tool-call hooks** — check or stub any tool call before it runs with `--hooks <file>`, following aux4 core's own hook standard (see below)
+- **Tool allow-list** — restrict which tools are bound to the model at all with `--tools <names>` (see below)
 - **searchContext embeddings** — the `searchContext` tool (document retrieval against `--storage`) uses `--embeddings` to pick its embeddings provider/config; default type is `local` (offline, no API key). Must match what `--storage` was learned with
 - **Tools are bound only when configured** — `searchContext`, `readReference`, and `readSkill` are given to the model only when `--storage` already has an indexed store, `--references` has at least one `.md` file, or `--skills` has at least one skill, respectively; otherwise they're left out entirely rather than bound as a no-op
 
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--embeddings <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--hooks <file>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--embeddings <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--hooks <file>] [--tools <names>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -50,6 +51,7 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: .agents/skills)
 --hooks          Path to a hooks file (default: "") -- see "Tool-call hooks" below
+--tools          Comma-separated allow-list of tools to bind, e.g. `executeAux4,currentDateTime` (default: "", meaning every tool stays bound) -- see "Tool allow-list" below
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -81,6 +83,16 @@ Compaction config fields:
 Every step gets `${__tool}`, `${__command}`, `${__request}` (this round's user request), `${__history}` (the `--history` file, so a hook can read prior tool results), `${__session}`, and the call's own params, interpolated exactly like a command's own declared variables. `after`/`error` steps additionally get `${__response}` / `${__error}` / `${__exitCode}`.
 
 With no `--hooks`, behavior is unchanged.
+
+**Tool allow-list (`--tools`):** By default every built-in tool the run has available (plus any tools from `mcp.json`, see below) is bound to the model. Pass a comma-separated list of tool names to `--tools` to bind only those — unlisted tools are left out of the model's tool schema entirely, the same as if they didn't exist for this run (not merely blocked at call time). Names are trimmed; an unknown name fails the run immediately with an error listing every valid name for that configuration (so the list reflects what `--storage`/`--references`/`--skills`/`mcp.json` actually enabled, not just the fixed built-in set). An empty or omitted `--tools` keeps the previous behavior unchanged.
+
+MCP tools (loaded from a local `mcp.json`, see the README) share the same flat namespace as the built-ins: with no `--tools`, every MCP tool stays bound; with a `--tools` list, an MCP tool is kept only when its own name is included, exactly like a built-in.
+
+```bash
+aux4 ai agent ask --tools executeAux4,currentDateTime "What's today's date, and list files in /tmp via executeAux4"
+```
+
+Only `executeAux4` and `currentDateTime` are offered to the model; `readFile`, `writeFile`, `listFiles`, etc. are not in its tool schema at all for this run.
 
 #### Example
 

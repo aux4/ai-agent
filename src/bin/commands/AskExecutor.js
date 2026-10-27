@@ -87,6 +87,9 @@ export async function askExecutor(params) {
       toolsConfig.historyFile = history || "";
       toolsConfig.session = history || params.runId || "session";
     }
+    if (params.tools && typeof params.tools === "string" && params.tools.trim() !== "") {
+      toolsConfig.toolNames = params.tools;
+    }
 
     const prompt = new Prompt(model, toolsConfig, { compaction, policy });
     await prompt.init();

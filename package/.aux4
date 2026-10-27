@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -149,7 +149,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, embeddings) --packageDir ${packageDir} --hooks ${hooks}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, embeddings) --packageDir ${packageDir} --hooks ${hooks} --tools ${tools}"
           ],
           "help": {
             "text": "Ask your question",
@@ -265,6 +265,11 @@
                 "default": ""
               },
               {
+                "name": "tools",
+                "text": "Comma-separated allow-list of tools to bind (e.g. executeAux4,currentDateTime). Unknown names error out listing the valid ones. Empty/unset binds all tools, unchanged from before",
+                "default": ""
+              },
+              {
                 "name": "embeddings",
                 "text": "Embeddings configuration as JSON for the searchContext tool (e.g., {\"type\":\"local\",\"config\":{\"dimension\":768}}). Must match what --storage was learned with. Default type is 'local' (offline, no API key)",
                 "default": "{}"
@@ -335,8 +340,8 @@
           "execute": [
             "set:question=${text}",
             "log:> ${text}",
-            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, hooks)",
-            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references, skills, hooks)"
+            "stdin:aux4 ai agent ask params(instructions, role, history, outputSchema, text, image, context, question, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, hooks, tools)",
+            "stdin:if(text==exit) && echo exit || aux4 ai agent chat params(instructions, role, history, outputSchema, image, context, model, storage, autoCompact, compaction, bio, permissions, models, useModel, references, skills, hooks, tools)"
           ],
           "help": {
             "text": "Chat with the AI agent",
@@ -429,6 +434,11 @@
               {
                 "name": "hooks",
                 "text": "Path to a hooks file ({\"hooks\":[...]}) that follows aux4 core's hook standard -- passed through to ask",
+                "default": ""
+              },
+              {
+                "name": "tools",
+                "text": "Comma-separated allow-list of tools to bind -- passed through to ask",
                 "default": ""
               },
               {

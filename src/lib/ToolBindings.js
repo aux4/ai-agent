@@ -60,3 +60,47 @@ export function hasSkills(skillsDir) {
   if (!skillsDir) return false;
   return listSkills(skillsDir).length > 0;
 }
+
+// Parse the `--tools` comma-separated allow-list into a trimmed, non-empty array, or null
+// when unset/empty -- null means "no filtering, bind everything" (unchanged behaviour).
+export function parseToolsAllowList(toolsSpec) {
+  if (!toolsSpec || typeof toolsSpec !== "string") return null;
+  const names = toolsSpec
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  return names.length > 0 ? names : null;
+}
+
+// Apply a `--tools` allow-list to the already-bound tool pools. Pure and side-effect-free:
+// given the built-in tools map (name -> tool) and the MCP tools array (tool.name), returns the
+// filtered pair, or throws when the list names a tool that doesn't exist in either pool.
+//
+// MCP tools are matched by name exactly like built-ins: with no list, every MCP tool stays
+// bound (same "no filtering" default as built-ins); with a list, an MCP tool is kept only when
+// its own name is in it. This treats the allow-list as a single flat namespace across built-in
+// and MCP tools rather than special-casing MCP servers.
+export function applyToolsAllowList(allowList, builtinTools, mcpTools = []) {
+  if (!allowList) {
+    return { builtinTools, mcpTools };
+  }
+
+  const validNames = [...Object.keys(builtinTools), ...mcpTools.map((t) => t.name)];
+  const validSet = new Set(validNames);
+  const unknown = allowList.filter((name) => !validSet.has(name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown tool${unknown.length > 1 ? "s" : ""} in --tools: ${unknown.join(", ")}. `
+      + `Valid tools: ${validNames.join(", ")}`
+    );
+  }
+
+  const allowSet = new Set(allowList);
+  const filteredBuiltins = {};
+  for (const [name, toolInstance] of Object.entries(builtinTools)) {
+    if (allowSet.has(name)) filteredBuiltins[name] = toolInstance;
+  }
+  const filteredMcp = mcpTools.filter((t) => allowSet.has(t.name));
+
+  return { builtinTools: filteredBuiltins, mcpTools: filteredMcp };
+}

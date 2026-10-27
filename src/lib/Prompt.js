@@ -8,6 +8,7 @@ import { readFile, asJson } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
+import { parseToolsAllowList, applyToolsAllowList } from "./ToolBindings.js";
 import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
@@ -82,21 +83,38 @@ class Prompt {
       }
     }
 
+    // `--tools` is an allow-list: when given, only the named tools are bound to the model at
+    // all (built-ins and MCP tools share one flat namespace). Validated against what this run
+    // actually has available -- a config that never enabled, say, readSkill will not offer it
+    // as a valid name either. Unset/empty keeps every tool bound, unchanged from before.
+    const allowList = parseToolsAllowList(this.toolsConfig.toolNames);
+    let effectiveBuiltinTools = configuredTools;
+    let effectiveMcpTools = mcpTools;
+    if (allowList) {
+      try {
+        const filtered = applyToolsAllowList(allowList, configuredTools, mcpTools);
+        effectiveBuiltinTools = filtered.builtinTools;
+        effectiveMcpTools = filtered.mcpTools;
+      } catch (e) {
+        throw new PromptError(e.message, e);
+      }
+    }
+
     if (this.apiType === "codex") {
-      this.codexApi.bindTools(Object.values(configuredTools));
-      if (mcpTools.length > 0) {
-        this.codexApi.bindTools(mcpTools);
+      this.codexApi.bindTools(Object.values(effectiveBuiltinTools));
+      if (effectiveMcpTools.length > 0) {
+        this.codexApi.bindTools(effectiveMcpTools);
       }
       this.tools = {
-        ...configuredTools,
-        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
+        ...effectiveBuiltinTools,
+        ...effectiveMcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
       };
     } else {
-      const allTools = [...Object.values(configuredTools), ...mcpTools];
+      const allTools = [...Object.values(effectiveBuiltinTools), ...effectiveMcpTools];
       this.model = this.model.bindTools(allTools);
       this.tools = {
-        ...configuredTools,
-        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
+        ...effectiveBuiltinTools,
+        ...effectiveMcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
       };
     }
   }
@@ -409,19 +427,43 @@ class Prompt {
             } catch (error) {
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
               console.error(`[tool] ${toolCall.name} => error (${elapsed}s): ${error.message}`);
-              return {
+              const entry = {
                 role: "tool",
                 content: `Error executing tool "${toolCall.name}": ${error.message}`,
                 tool_call_id: toolCall.id,
                 name: toolCall.name,
                 timestamp: Date.now()
               };
+              // The loop guard's own abort (Tools.js LOOP_ABORT_AFTER) marks the error with
+              // loopAbort -- a refused call that keeps being repeated anyway. Returning this
+              // as just another tool error lets the caller recurse right back into the same
+              // refused call forever (the original bug: 500 calls over 12 minutes). Mark the
+              // entry so the caller ends the run instead of looping again.
+              if (error.loopAbort) {
+                entry.loopAbort = true;
+                entry.loopAbortCall = { name: toolCall.name, args: toolCall.args };
+              }
+              return entry;
             }
           })
         );
 
         this.messages.push(...toolResults);
         this.saveHistory();
+
+        // A loop-guard abort ends the run here instead of recursing into another
+        // this.execute() -- recursing is exactly what let the refused call keep being
+        // reissued (and refused, and reissued) until something else killed the process.
+        const loopAbort = toolResults.find((entry) => entry.loopAbort);
+        if (loopAbort) {
+          const { name, args } = loopAbort.loopAbortCall;
+          const argsPreview = typeof args === "object" ? JSON.stringify(args) : String(args);
+          const answer = `Stopped: the agent kept repeating a call that was already refused for `
+            + `looping (${name}(${argsPreview})). Last result: ${loopAbort.content}`;
+          this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
+          this.saveHistory(true);
+          return answer;
+        }
 
         return await this.execute();
       }

@@ -14,13 +14,15 @@ AUX4_BIN="$(command -v aux4)"
 echo "$AUX4_BIN" > aux4-bin-path.txt
 nohup node support/mock-openai-loop-server.mjs 58294 never >mock-loop-repeat.log 2>&1 &
 nohup node support/mock-openai-loop-server.mjs 58295 2 >mock-loop-change.log 2>&1 &
+nohup node support/mock-openai-loop-server.mjs 58296 never 6 >mock-loop-abort.log 2>&1 &
 sleep 1
 ```
 
 ```afterAll
 pkill -f "mock-openai-loop-server.mjs 58294" || true
 pkill -f "mock-openai-loop-server.mjs 58295" || true
-rm -f history.json loop-counter.txt mock-loop-repeat.log mock-loop-change.log aux4-bin-path.txt
+pkill -f "mock-openai-loop-server.mjs 58296" || true
+rm -f history.json loop-counter.txt mock-loop-repeat.log mock-loop-change.log mock-loop-abort.log aux4-bin-path.txt
 ```
 
 ```beforeEach
@@ -59,4 +61,27 @@ echo "real calls: $(wc -l < loop-counter.txt | tr -d ' ')"
 
 ```expect:partial
 Email retrieved: msg-ship-9f21**real calls: 3
+```
+
+## the model keeps reissuing the call even after the guard refuses it
+
+A model that ignores the refusal and keeps sending the identical broken call must not be able to
+run forever -- after a few refusals (`LOOP_ABORT_AFTER`), the run itself has to end instead of
+recursing back into the model with yet another "not run" notice appended. The real command must
+still only ever run twice: the abort happens on refused (not-run) rounds, so the call count can't
+grow past that either.
+
+### should stop the run after repeated refusals instead of looping forever
+
+```timeout
+30000
+```
+
+```execute
+AUX4_BIN="$(cat aux4-bin-path.txt)"; AUX4_LOOP_GUARD_COUNTER="$PWD/loop-counter.txt" PATH="$PWD/support/loop-guard-bin:$PATH" "$AUX4_BIN" ai agent ask --model '{"type":"openai","config":{"model":"gpt-test","apiKey":"sk-test","configuration":{"baseURL":"http://127.0.0.1:58296/v1"}}}' --history history.json 'go'
+echo "real calls: $(wc -l < loop-counter.txt | tr -d ' ')"
+```
+
+```expect:partial
+Stopped:**kept repeating**real calls: 2
 ```

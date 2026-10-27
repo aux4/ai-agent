@@ -66,6 +66,8 @@ Key variables (from the package help):
 - useModel (default: "") — named model from registry to use for this request.
 - references (default: "${packageDir}/references") — path to the references directory (see [References](#references)).
 - skills (default: ".agents/skills") — path to the skills directory (see [Skills](#skills)).
+- hooks (default: "") — path to a tool-call hooks file (see [Tool-Call Hooks](#tool-call-hooks)).
+- tools (default: "") — comma-separated allow-list of tools to bind, e.g. `executeAux4,currentDateTime`; empty binds every tool, unchanged from before (see [Tool Allow-List](#tool-allow-list)).
 - question (arg: true) — the question to ask (positional/argument).
 
 Usage examples:
@@ -552,10 +554,15 @@ Two safeguards run on every turn, independent of any tool policy configuration:
   and request identifiers are normalised out of the comparison) that returns the exact same result
   twice is **refused** the next time it is attempted — the refusal message quotes the repeated
   result and tells the model to change the call instead of repeating it. If the model repeats the
-  refused call anyway, the run **aborts** after three refusals: a model that ignores the refusal and
-  keeps reissuing the identical call would otherwise grow the context forever (one unbounded run
-  reached 624 calls before this guard existed). A call whose arguments change, or whose result
-  changes (e.g. legitimate polling), is never blocked.
+  refused call anyway, the run itself **ends** after three refusals instead of continuing to ask
+  the model again: the final answer reports that the agent stopped because it kept repeating a
+  refused call, naming the call and its last result. Without this, a model that ignores the
+  refusal and keeps reissuing the identical call grows the context forever — one unbounded run
+  reached 624 calls, and a dojo run called a denied `listFiles` ~500 times over 12 minutes, before
+  this guard actually stopped the run (rather than just refusing the call and looping back for
+  another refusal). A call whose arguments change, or whose result changes (e.g. legitimate
+  polling), is never blocked, and the real underlying tool never runs again once a call starts
+  being refused — only the refused/aborted notices keep being generated until the abort fires.
 
 ## Tool-Call Hooks
 
@@ -632,6 +639,32 @@ Every step gets the call's own params interpolated as `${var}`, plus:
 
 With no `--hooks`, behavior is completely unchanged. `chat` accepts the same flag and passes it
 through to `ask` on every turn.
+
+## Tool Allow-List
+
+By default every tool the run has available — the built-ins plus anything loaded from a local
+`mcp.json` — is bound to the model. `--tools <names>` restricts that to a comma-separated list of
+tool names:
+
+```bash
+aux4 ai agent ask --tools executeAux4,currentDateTime "What's today's date, and list files in /tmp"
+```
+
+Only `executeAux4` and `currentDateTime` are offered to the model this run; the rest (`readFile`,
+`writeFile`, `listFiles`, `searchContext`, ...) are not in its tool schema at all — not merely
+blocked once called, genuinely absent, the same effect as if they didn't exist for this request.
+
+- Names are trimmed; extra commas/whitespace are ignored.
+- An unknown name fails the run immediately with an error listing every tool name valid for that
+  configuration — which reflects what `--storage`/`--references`/`--skills`/`mcp.json` actually
+  enabled for this run, not a fixed static list.
+- MCP tools share the same flat namespace as the built-ins: with no `--tools`, every MCP tool
+  stays bound (same default as built-ins); with a `--tools` list, an MCP tool is kept only when
+  its own name is in it, exactly like a built-in — there is no separate carve-out that always
+  keeps MCP tools regardless of the list.
+- An empty or omitted `--tools` keeps every tool bound, unchanged from before this flag existed.
+
+`chat` accepts the same flag and passes it through to `ask` on every turn.
 
 ## Model Selection
 

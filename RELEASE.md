@@ -1,3 +1,35 @@
+# Release 1.3.2
+
+## Fixes
+
+- **`--tools` now actually filters which tools are bound (HARN-036).** `ask`/`chat` have
+  documented `--tools` as "comma-separated allow-list of tools to bind" since it was added, but
+  there was no implementation behind it -- every request bound every built-in tool regardless.
+  Found via a dojo trace where Gemma 26B called `listFiles` on a denied folder ~500 times over 12
+  minutes with nothing to stop it from even trying. `--tools` is now wired through
+  `executable.js` -> `AskExecutor` -> `Prompt.js#init`, which filters the built-in + MCP tool pool
+  down to the named list right before binding to the model (`ToolBindings.js`:
+  `parseToolsAllowList`/`applyToolsAllowList`). An unknown name fails fast with an error listing
+  the tools actually valid for that configuration. MCP tools share the same flat namespace as
+  built-ins: unfiltered by default, matched by name when a list is given. Empty/unset is
+  unchanged behavior.
+- **A loop-guard abort now actually ends the run (HARN-036).** The tool-loop guard (1.2.6,
+  `LOOP_ABORT_AFTER`) already refused a call repeated past its limit and threw a
+  `err.loopAbort = true` error after enough refusals -- but `Prompt.js` caught every tool error
+  identically, turned it into "Error executing tool ..." tool-message text, and recursed back into
+  the model with the exact same (now slightly longer) context. A model that ignores the refusal
+  got refused again, forever: the abort existed but never actually stopped anything, which is
+  exactly how a dojo run burned 12 minutes on a single denied call. A `loopAbort` error now ends
+  the run instead of recursing: the refusal is still recorded in history, but the run returns a
+  final answer stating it stopped because it kept repeating a refused call, naming the call and
+  its last result (same normal-exit path as the existing stall-recovery guard, not a thrown
+  process error).
+- Confirmed and left unchanged: the policy `budget.calls` cap only counts consequential tool
+  calls (`executeAux4`, `writeFile`, `editFile`, `removeFiles`, `createDirectory`, `saveImage`) --
+  this is the documented, deliberate scope (`Policy.js`'s own top-of-file comment and the README's
+  "per-run consequential tool call cap"), not a gap to close. Read-only tool loops are caught by
+  the loop guard above instead, which is tool-agnostic.
+
 # Release 1.3.1
 
 ## Fixes
