@@ -310,6 +310,20 @@ export function isInsideHook() {
 // Wrap a bound LangChain tool so every call is checked against `hooksContext.hooks`
 // before it runs (before/replace), and after it runs (after/error) -- see module header
 // for the full phase contract. Returns the tool unchanged when there are no hooks.
+// The hook's __history: a snapshot of the live conversation when the caller can give
+// it (the file on disk may lag behind the latest tool results), else the history file.
+export function liveHistoryFile(hooksContext) {
+  if (typeof hooksContext.getMessages !== "function") return hooksContext.historyFile;
+  try {
+    const messages = hooksContext.getMessages() || [];
+    const file = path.join(os.tmpdir(), `aux4-hook-history-${process.pid}.json`);
+    fs.writeFileSync(file, JSON.stringify({ messages: messages.filter(m => m.role !== "system") }));
+    return file;
+  } catch {
+    return hooksContext.historyFile;
+  }
+}
+
 // After this many blocks of the same command in one run, the run ends.
 export const HOOK_BLOCK_ABORT_AFTER = 3;
 
@@ -345,7 +359,7 @@ export function wrapWithHooks(name, underlyingTool, hooksContext) {
         commandPath,
         callParams,
         request: hooksContext.request,
-        historyFile: hooksContext.historyFile,
+        historyFile: liveHistoryFile(hooksContext),
         session: hooksContext.session
       });
 

@@ -67,6 +67,12 @@ class Prompt {
       };
     }
 
+    // Hooks read prior tool results from a history file; hand them the LIVE conversation
+    // instead of trusting the file on disk to be current.
+    if (this.toolsConfig && this.toolsConfig.hooksFile) {
+      this.toolsConfig = { ...this.toolsConfig, getMessages: () => this.messages };
+    }
+
     // Create tools with configuration if provided
     const configuredTools = Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools;
 

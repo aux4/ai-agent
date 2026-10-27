@@ -266,3 +266,16 @@ test("wrapWithHooks: a non-executeAux4 tool matches on tool name, params filter 
   assert.equal(allowed, "written");
   assert.equal(getCalls(), 1);
 });
+
+import { liveHistoryFile } from "../src/lib/Hooks.js";
+
+test("a hook's __history is a snapshot of the live conversation, not a stale file", async () => {
+  const fsm = await import("node:fs");
+  const stale = "/tmp/aux4-stale-history-test.json";
+  fsm.writeFileSync(stale, JSON.stringify({ messages: [] }));
+  const live = [{ role: "user", content: "do it" }, { role: "tool", content: "{\"status\":\"needs-input\"}", tool_call_id: "c1" }];
+  const file = liveHistoryFile({ historyFile: stale, getMessages: () => live });
+  const read = JSON.parse(fsm.readFileSync(file, "utf8"));
+  assert.equal(read.messages.length, 2);
+  assert.equal(liveHistoryFile({ historyFile: stale }), stale);
+});

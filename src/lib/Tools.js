@@ -1699,7 +1699,7 @@ function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
 }
 
 export function createTools(config = {}) {
-  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage, hooksFile, request, historyFile, session } = config;
+  const { storage, embeddingsConfig, permissions, references, skills, policy, getUsage, hooksFile, request, historyFile, session, getMessages } = config;
 
   const base = {
     readFile: permissions ? createReadFileTool(permissions) : readLocalFileTool,
@@ -1748,7 +1748,7 @@ export function createTools(config = {}) {
   // aux4 core's before-hook-runs-first contract.
   const hooks = hooksFile ? loadHooks(hooksFile) : [];
   if (hooks.length > 0) {
-    const hooksContext = { hooks, request, historyFile, session };
+    const hooksContext = { hooks, request, historyFile, session, getMessages };
     for (const name of Object.keys(base)) {
       base[name] = wrapWithHooks(name, base[name], hooksContext);
     }

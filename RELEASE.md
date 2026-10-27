@@ -3,6 +3,15 @@
 
 
 
+
+## 1.3.6
+
+- A hook's `__history` is a snapshot of the live conversation written for that hook call,
+  not the history file on disk, which can lag behind the latest tool results (its write is
+  skipped when the file on disk is larger). A check that depends on a tool result from the same
+  run -- such as "a confirmation must answer a confirmation the tool asked for" -- no longer
+  blocks a legitimate call.
+
 ## 1.3.5
 
 - When aux4 answers "Command not found ... Did you mean: <path>", executeAux4 adds the exact call
