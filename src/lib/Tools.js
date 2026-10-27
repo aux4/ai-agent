@@ -1,5 +1,5 @@
 import fs from "fs";
-import { repeatFixHint } from "./LoopHint.js";
+import { repeatFixHint, correctedCommand } from "./LoopHint.js";
 import path from "path";
 import os from "os";
 import { spawn, spawnSync } from "child_process";
@@ -526,6 +526,15 @@ async function executeAux4Argv(command, { argv, stdin, timeout, cwd }) {
   }
 }
 
+// A "Did you mean" from aux4 is turned into the exact call to make, with the agent's
+// own arguments, so it can be run as-is.
+function withCommandFix(message, command) {
+  const meant = String(message).match(/Command not found[\s\S]*?Did you mean:\s*(?:aux4\s+)?([^\n]+?)\s*$/m);
+  if (!meant) return message;
+  const fixed = correctedCommand(String(command || ""), meant[1].trim());
+  return fixed ? `${message}\nRun this instead (executeAux4 command): ${fixed}` : message;
+}
+
 export const executeAux4CliTool = tool(
   async ({ command, stdin, timeout, cwd }) => {
     // Check system-level deny first (cannot be overridden)
@@ -552,7 +561,7 @@ export const executeAux4CliTool = tool(
       if (error.timedOut) {
         return formatTimeoutMessage(command, timeout, error);
       }
-      return `Error executing command: ${error.message}`;
+      return withCommandFix(`Error executing command: ${error.message}`, command);
     }
   },
   {
@@ -680,7 +689,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
       if (error.timedOut) {
         return formatTimeoutMessage(command, timeout, error);
       }
-      return `Error executing command: ${error.message}`;
+      return withCommandFix(`Error executing command: ${error.message}`, command);
     }
   },
   {
@@ -1619,7 +1628,7 @@ function wrapWithLoopDetection(name, underlyingTool) {
         }
 
         const sample = String(prior.result).slice(0, 200);
-        const fix = repeatFixHint(prior.result);
+        const fix = repeatFixHint(prior.result, args && args.command);
         return `Not run: you have already made this exact call ${prior.count} times and it returned`
           + ` the same result every time:\n${sample}\n\nRepeating it will not change anything.`
           + (fix ? ` ${fix}` : ` Read the current state and take a different route, or stop and report what is blocking you.`);

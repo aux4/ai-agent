@@ -2,6 +2,14 @@
 
 
 
+
+## 1.3.5
+
+- When aux4 answers "Command not found ... Did you mean: <path>", executeAux4 adds the exact call
+  to make instead -- the suggested path with the agent's own arguments -- and the loop guard's
+  refusal of a repeated not-found call says the same. A model that kept re-issuing a call under
+  the wrong parent ("ai agent browser find") gets a ready-to-run correction.
+
 ## 1.3.4
 
 - Neutral example value in the executeAux4 quoting docs (`price $9.99`).
