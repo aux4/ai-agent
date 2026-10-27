@@ -25,18 +25,18 @@ rm -f history.json
 
 ## a bare $ inside a double-quoted argument is not expanded
 
-### should reach the command exactly as written, including the $482.50 amount
+### should reach the command exactly as written, including the $9.99 amount
 
 ```timeout
 30000
 ```
 
 ```execute
-AUX4_BIN="$(command -v aux4)"; PATH="$PWD/support:$PATH" "$AUX4_BIN" ai agent ask --model '{"type":"openai","config":{"model":"gpt-test","apiKey":"sk-test","configuration":{"baseURL":"http://127.0.0.1:58291/v1"}}}' --history history.json 'RUN:x --q "price $482.50"'
+AUX4_BIN="$(command -v aux4)"; PATH="$PWD/support:$PATH" "$AUX4_BIN" ai agent ask --model '{"type":"openai","config":{"model":"gpt-test","apiKey":"sk-test","configuration":{"baseURL":"http://127.0.0.1:58291/v1"}}}' --history history.json 'RUN:x --q "price $9.99"'
 ```
 
 ```expect:partial
-"price $482.50"
+"price $9.99"
 ```
 
 ## an unquoted & inside a word (URL query string) passes through as one argument

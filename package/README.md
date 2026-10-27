@@ -1188,7 +1188,7 @@ User Doe, Jane from the tool
 **No shell is involved.** `aux4` is spawned directly with the command string split into
 arguments using POSIX-style quoting (`'...'` literal, `"..."` allows only `\"`/`\\`
 escapes). Nothing is ever expanded — `$VAR`, `` `...` ``, `$()`, globs and `~` are passed
-through exactly as written, so a value like `$482.50` or a URL with `&` reaches the command
+through exactly as written, so a value like `$9.99` or a URL with `&` reaches the command
 unchanged. An unquoted `;`, `|`, `&&`, `||`, `>` or `<` standing as its own word is rejected
 with an error (it would mean shell chaining, which does not run here); the same characters
 inside a quoted or larger argument are plain text.

@@ -4,7 +4,7 @@
 // string is ever interpreted by a shell: `;`, `&&`, `|`, `>`, `<`, backticks, `$(...)`,
 // `${...}`, bare `$VAR` and newlines are all plain argument text once they are part of a
 // word. aux4 commands escape their own params (value()/param()), so the argv reaches the
-// command exactly as written — in particular `$482.50` and `?a=1&b=2` arrive unchanged,
+// command exactly as written — in particular `$9.99` and `?a=1&b=2` arrive unchanged,
 // which a shell (even with the old operator guard) would mangle or reject.
 //
 // Quoting follows POSIX shell word rules so commands the model writes as it would type

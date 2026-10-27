@@ -1,6 +1,11 @@
 # Release 1.3.2
 
 
+
+## 1.3.4
+
+- Neutral example value in the executeAux4 quoting docs (`price $9.99`).
+
 ## 1.3.3
 
 - A hook that blocks the same command 3 times in one run ends the run (loop abort) with the

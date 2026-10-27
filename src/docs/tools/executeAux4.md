@@ -68,7 +68,7 @@ you would type it in a terminal:
 - `'...'` is literal — nothing inside is special.
 - `"..."` allows `\"` and `\\` escapes only. `$`, `` ` ``, `$()`, `${}` and `~` are NEVER
   expanded, quoted or not — write them exactly as they should reach the command, e.g.
-  `"price $482.50"` arrives as `price $482.50`.
+  `"price $9.99"` arrives as `price $9.99`.
 - Characters like `;`, `|`, `&`, `>`, `<` are plain text when they're part of an argument
   (a URL `"http://host/path?a=1&b=2"` passes through untouched). An UNQUOTED `;`, `|`,
   `&&`, `||`, `>` or `<` that stands as its OWN word is rejected with an error — it almost
