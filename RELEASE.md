@@ -5,6 +5,10 @@
 
 
 
+## 1.3.8
+
+- Successful mutations are recorded by command and stable target. A later call to the same target is refused even if cosmetic fields or argument order change; failed mutations remain retryable.
+
 ## 1.3.7
 
 - A policy deny entry may carry a `reason` (`{"executeAux4": ["browser *"], "reason": "use agent

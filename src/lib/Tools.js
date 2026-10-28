@@ -10,7 +10,7 @@ import LlmStore from "./LlmStore.js";
 import { getEmbeddings, DEFAULT_EMBEDDINGS_TYPE } from "./Embeddings.js";
 import { ensureCompatibleEmbeddings } from "./EmbeddingsGuard.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
-import { buildAux4Argv, CommandParseError } from "./CommandArgs.js";
+import { buildAux4Argv, CommandParseError, parseCommandArgs } from "./CommandArgs.js";
 import { loadHooks, wrapWithHooks } from "./Hooks.js";
 import { hasConfiguredStorage, hasReferences, hasSkills } from "./ToolBindings.js";
 
@@ -1579,6 +1579,94 @@ const LOOP_ABORT_AFTER = 3;
 // is also a loop: "--field 'X=a'" then "--field 'X=b'" then no field at all, each told
 // the same thing. Values and volatile ids are dropped from this key.
 const SHAPE_REPEAT_LIMIT = 4;
+const MUTATION_VERB = /\b(send|reply|forward|delete|remove|rm|trash|archive|update|patch|put|post|create|insert|add|set|write|move|cancel|modify|edit|rename|upload|publish|deploy|pay|approve|install|uninstall|save|submit|book|confirm)\b/i;
+const NATURAL_TARGET_FLAGS = new Set([
+  "date", "email", "end", "enddate", "endtime", "name", "number", "phone",
+  "slug", "start", "startdate", "starttime", "subject", "summary", "title",
+  "to", "url", "username"
+]);
+const CONTEXT_TARGET_FLAGS = new Set([
+  "accountid", "calendarid", "folderid", "orgid", "organizationid", "parentid",
+  "projectid", "teamid", "tenantid", "userid", "workspaceid"
+]);
+const ENTITY_ID_FLAGS = /^(?:id|[a-z0-9_-]*id|key|[a-z0-9_-]*key)$/i;
+
+// Parse the command at the same shell-word boundary executeAux4 uses, then keep
+// only the stable parts that identify the changed target. This is deliberately
+// independent of any package or service schema: explicit entity IDs win;
+// otherwise common natural keys (such as summary + start) identify a target.
+export function mutationTarget(name, args = {}) {
+  if (name !== "executeAux4" || typeof args.command !== "string") return null;
+  let argv;
+  try {
+    argv = parseCommandArgs(args.command);
+  } catch {
+    return null;
+  }
+  if (argv[0] === "aux4") argv = argv.slice(1);
+  const firstFlag = argv.findIndex(arg => arg.startsWith("--"));
+  const commandPath = (firstFlag < 0 ? argv : argv.slice(0, firstFlag)).join(" ").trim();
+  if (!commandPath || !MUTATION_VERB.test(commandPath)) return null;
+
+  const flags = new Map();
+  for (let i = Math.max(0, firstFlag); i < argv.length; i++) {
+    const token = argv[i];
+    if (!token.startsWith("--")) continue;
+    const equals = token.indexOf("=");
+    const key = (equals < 0 ? token.slice(2) : token.slice(2, equals)).toLowerCase();
+    let value = equals < 0 ? "true" : token.slice(equals + 1);
+    if (equals < 0 && i + 1 < argv.length && !argv[i + 1].startsWith("--")) value = argv[++i];
+    const values = flags.get(key) || [];
+    values.push(value);
+    flags.set(key, values);
+  }
+
+  const sorted = entries => Object.fromEntries([...entries]
+    .map(([key, values]) => [key, [...new Set(values)].sort()])
+    .sort(([a], [b]) => a.localeCompare(b)));
+  const entityIds = sorted([...flags].filter(([key]) => ENTITY_ID_FLAGS.test(key) && !CONTEXT_TARGET_FLAGS.has(key)));
+  const naturalKeys = sorted([...flags].filter(([key]) => NATURAL_TARGET_FLAGS.has(key)));
+  const contexts = sorted([...flags].filter(([key]) => CONTEXT_TARGET_FLAGS.has(key)));
+  return {
+    commandPath,
+    entityIds,
+    naturalKeys,
+    contexts,
+    // When a command exposes no target fields, only an exact repeated command
+    // can be identified safely.
+    fallback: Object.keys(entityIds).length || Object.keys(naturalKeys).length
+      ? ""
+      : argv.join("\0")
+  };
+}
+
+function sameFields(left, right, { requireShared = false } = {}) {
+  const shared = Object.keys(left).filter(key => Object.hasOwn(right, key));
+  if (requireShared && shared.length === 0) return false;
+  return shared.every(key => JSON.stringify(left[key]) === JSON.stringify(right[key]));
+}
+
+export function sameMutationTarget(left, right) {
+  if (!left || !right || left.commandPath !== right.commandPath) return false;
+  if (!sameFields(left.contexts, right.contexts)) return false;
+  const leftIds = Object.keys(left.entityIds);
+  const rightIds = Object.keys(right.entityIds);
+  if (leftIds.length && rightIds.length) return sameFields(left.entityIds, right.entityIds, { requireShared: true });
+  if (sameFields(left.naturalKeys, right.naturalKeys, { requireShared: true })) return true;
+  return Boolean(left.fallback && left.fallback === right.fallback);
+}
+
+export function commandResultFailed(result) {
+  const text = String(result ?? "").trim();
+  if (/^(?:not run:|invalid command:|error\b|failed\b|command not found\b|permission denied:|⛔\s*policy)/i.test(text)) return true;
+  try {
+    const parsed = JSON.parse(text);
+    return Boolean(parsed?.error || parsed?.errorMessage) || parsed?.success === false || ["error", "failed"].includes(String(parsed?.status || "").toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export function callShape(name, args) {
   const cleanArgs = { ...args };
   delete cleanArgs.__policyCallId;
@@ -1593,14 +1681,19 @@ export function resultShape(result) {
     .slice(0, 400);
 }
 
-function wrapWithLoopDetection(name, underlyingTool) {
+export function wrapWithLoopDetection(name, underlyingTool) {
   const seen = new Map();
   const shapes = new Map();
+  const successfulChanges = [];
 
   return tool(
     async (args) => {
       const cleanArgs = { ...args };
       delete cleanArgs.__policyCallId;
+      const target = mutationTarget(name, cleanArgs);
+      if (target && successfulChanges.some(prior => sameMutationTarget(prior, target))) {
+        return "Not run: a change of this kind for this target already succeeded in this run. Read the current state and stop; do not issue another change to it.";
+      }
       // Volatile identifiers defeat the comparison: a browser daemon restart yields a new
       // session id, so an agent repeating the identical journey looks like all-new calls.
       // Normalise them out so the key describes what is being done, not which handle it used.
@@ -1653,6 +1746,7 @@ function wrapWithLoopDetection(name, underlyingTool) {
 
       const result = await underlyingTool.invoke(args);
       const asText = String(result);
+      if (target && !commandResultFailed(asText)) successfulChanges.push(target);
       seen.set(key, prior && prior.result === asText
         ? { count: prior.count + 1, result: asText }
         : { count: 1, result: asText });
