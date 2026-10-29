@@ -179,3 +179,16 @@ test("read-family refusals retain facts and terminate instead of growing forever
   assert.equal(aborted, true);
   assert.equal(calls, 2);
 });
+
+
+test("two filtered misses cannot prohibit a broader lookup that finds new evidence", async () => {
+  let calls = 0;
+  const guarded = wrapWithLoopDetection('executeAux4', {
+    description:'execute aux4', schema:z.object({command:z.string()}),
+    invoke:async () => ++calls < 3 ? '{"records":[]}' : '{"records":[{"id":"r7"}]}'
+  });
+  assert.deepEqual(JSON.parse(String(await guarded.invoke({command:'records list --query "narrow words"'}))), {records:[]});
+  await guarded.invoke({command:'records list --query "still narrow"'});
+  assert.deepEqual(JSON.parse(String(await guarded.invoke({command:'records list'}))), {records:[{id:'r7'}]});
+  assert.equal(calls,3);
+});

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { repeatFixHint } from "../src/lib/LoopHint.js";
+import { repeatFixHint, emptyLookupRecovery, isEmptyLookupResult } from "../src/lib/LoopHint.js";
 
 test("repeatFixHint names the missing flag from aux4's own error", () => {
   const hint = repeatFixHint("Error executing command: Missing required parameter --messageId: The message ID to retrieve");
@@ -28,4 +28,19 @@ test("correctedCommand swaps the wrong leading words for the suggested path", as
   const { correctedCommand } = await import("../src/lib/LoopHint.js");
   assert.equal(correctedCommand("ai agent browser run --url x --goal y", "agent browser run"), "agent browser run --url x --goal y");
   assert.equal(correctedCommand("foo bar --a 1", "agent browser find"), "");
+});
+
+
+test("filtered misses get bounded broadening advice without changing the result", () => {
+  const result = '{"records":[]}';
+  const recovery = emptyLookupRecovery('records search --query "strict words"', result);
+  assert.equal(recovery.family, 'records search');
+  assert.match(recovery.message, /preserving every explicit user constraint/);
+  assert.match(recovery.message, /one materially broader lookup/);
+  assert.equal(result, '{"records":[]}');
+  assert.equal(emptyLookupRecovery('records search', result), null);
+  assert.equal(emptyLookupRecovery('records create --query strict', result), null);
+  assert.equal(emptyLookupRecovery('records search --query strict', '{"records":[{"id":"r7"}]}'), null);
+  assert.equal(emptyLookupRecovery('records search --query strict', '{"id":"r7","errors":[]}'), null);
+  assert.equal(isEmptyLookupResult('records search --query strict','{"data":{"items":[]}}'), true);
 });

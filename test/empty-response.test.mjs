@@ -116,3 +116,28 @@ test("three unusable provider requests stop with bounded feedback", async () => 
   assert.match(await prompt.execute(), /unusable tool request three times/);
   assert.equal(calls(), 3);
 });
+
+
+test("empty-lookup advice preserves raw tool data and adds no model call or automatic search", async () => {
+  const call = (id,command) => new AIMessage({content:'',tool_calls:[{name:'executeAux4',args:{command},id,type:'tool_call'}]});
+  const {prompt,calls} = fakePrompt([call('one','records list --query narrow'),call('two','records list'),new AIMessage('done')]);
+  const invoked=[];
+  prompt.tools.executeAux4={invoke:async ({command}) => {invoked.push(command);return invoked.length===1 ? '{"items":[]}' : '{"items":[{"id":"r7"}]}';}};
+  assert.equal(await prompt.execute(),'done');
+  assert.equal(calls(),3);
+  assert.deepEqual(invoked,['records list --query narrow','records list']);
+  const results=prompt.messages.filter(message=>message.role==='tool').map(message=>JSON.parse(message.content));
+  assert.deepEqual(results,[{items:[]},{items:[{id:'r7'}]}]);
+  assert.equal(prompt.messages.filter(message=>String(message.content).startsWith('A filtered lookup returned')).length,1);
+});
+
+test("repeated empty lookups get only one broadening hint per command family", async () => {
+  const call = (id,query) => new AIMessage({content:'',tool_calls:[{name:'executeAux4',args:{command:'records list --query '+query},id,type:'tool_call'}]});
+  const {prompt,calls}=fakePrompt([call('one','narrow'),call('two','broad'),new AIMessage('No matching record found.')]);
+  let invoked=0;
+  prompt.tools.executeAux4={invoke:async()=>{invoked++;return '{"items":[]}';}};
+  await prompt.execute();
+  assert.equal(calls(),3);
+  assert.equal(invoked,2);
+  assert.equal(prompt.messages.filter(message=>String(message.content).startsWith('A filtered lookup returned')).length,1);
+});

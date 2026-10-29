@@ -1,5 +1,5 @@
 import fs from "fs";
-import { repeatFixHint, correctedCommand } from "./LoopHint.js";
+import { repeatFixHint, correctedCommand, isEmptyLookupResult } from "./LoopHint.js";
 import { parameterErrorHelp, parameterHelpArgs } from "./ParameterHelp.js";
 import path from "path";
 import os from "os";
@@ -1794,17 +1794,19 @@ export function wrapWithLoopDetection(name, underlyingTool) {
 
       const readFamily = readCommandFamily(name, cleanArgs);
       const familyResults = readFamily && readResults.get(readFamily);
-      const repeatedEvidence = familyResults && [...familyResults.entries()].find(([, count]) => count >= 2);
+      const repeatedEvidence = familyResults && [...familyResults.entries()].find(([result, count]) =>
+        count >= (isEmptyLookupResult(args?.command, result) ? 4 : 2));
       if (repeatedEvidence) {
         const refused = (refusedReads.get(readFamily) || 0) + 1;
         refusedReads.set(readFamily, refused);
         const evidence = repeatedEvidence[0].slice(0, 1200);
+        const repetition = repeatedEvidence[1] === 2 ? "twice" : `${repeatedEvidence[1]} times`;
         if (refused >= LOOP_ABORT_AFTER) {
-          const error = new Error(`Aborting: the same action has returned the same result twice and ${refused} further reads were refused. The agent is not making progress. Existing evidence:\n${evidence}`);
+          const error = new Error(`Aborting: the same action has returned the same result ${repetition} and ${refused} further reads were refused. The agent is not making progress. Existing evidence:\n${evidence}`);
           error.loopAbort = true;
           throw error;
         }
-        return `Not run: ${readFamily} has already returned identical evidence twice after different arguments. Reuse the existing facts to finish the remaining work; choose a materially different source only if a required fact is absent. If this was group help, run one of the listed subcommands before adding flags.\nExisting evidence:\n${evidence}`;
+        return `Not run: ${readFamily} has already returned identical evidence ${repetition} after different arguments. Reuse the existing facts to finish the remaining work; choose a materially different source only if a required fact is absent. If this was group help, run one of the listed subcommands before adding flags.\nExisting evidence:\n${evidence}`;
       }
 
       if (target) pendingChanges.push(target);

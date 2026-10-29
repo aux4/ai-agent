@@ -1,3 +1,5 @@
+import { parseCommandArgs } from "./CommandArgs.js";
+
 // When the repeated result is aux4's own parameter error, it already names the fix; a small
 // model that re-reads only "do not repeat" tends to wander off instead of changing the flag.
 export function repeatFixHint(result, command = "") {
@@ -31,4 +33,35 @@ export function correctedCommand(command, suggestion) {
   const at = String(command || "").indexOf(tail);
   if (at < 0) return "";
   return `${words.join(" ")}${command.slice(at + tail.length)}`.trim();
+}
+
+
+function lookupPath(command) {
+  let argv;
+  try { argv = parseCommandArgs(String(command || "")); } catch { return null; }
+  if (argv[0] === "aux4") argv = argv.slice(1);
+  const flagAt = argv.findIndex(word => word.startsWith("--"));
+  const path = flagAt < 0 ? argv : argv.slice(0, flagAt);
+  if (!/^(?:list|search|find|query|lookup)$/i.test(path.at(-1) || "")) return null;
+  return { argv, family: path.join(" ") };
+}
+
+export function isEmptyLookupResult(command, result) {
+  if (!lookupPath(command)) return false;
+  let data;
+  try { data = typeof result === "string" ? JSON.parse(result) : result; } catch { return false; }
+  if (Array.isArray(data)) return data.length === 0;
+  if (!data || typeof data !== "object" || data.answered === true || data.found === true) return false;
+  const containers = [data, ...(data.data && typeof data.data === "object" && !Array.isArray(data.data) ? [data.data] : [])];
+  const arrays = containers.flatMap(container => Object.entries(container)
+    .filter(([key, value]) => /^(?:items|records|messages|results|rows|entries|matches|events|value|data)$/i.test(key) && Array.isArray(value))
+    .map(([, value]) => value));
+  return arrays.length > 0 && arrays.every(array => array.length === 0);
+}
+
+export function emptyLookupRecovery(command, result) {
+  const lookup = lookupPath(command);
+  if (!lookup || !isEmptyLookupResult(command, result)
+    || !lookup.argv.some(word => /^--(?:query|filter|search|q|where|timeMin|timeMax|labelIds)(?:=|$)/i.test(word))) return null;
+  return { family: lookup.family, message: "A filtered lookup returned no matching records. That only rules out the current filters, not the named target. Try one materially broader lookup or inspect candidates with fewer optional filters, preserving every explicit user constraint. Do not repeat the same filters. If that also yields no relevant evidence, report what is missing." };
 }

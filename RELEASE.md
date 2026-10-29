@@ -5,6 +5,10 @@
 
 
 
+## 1.3.19
+
+- Coach one broader lookup after a filtered miss while preserving the raw result and user constraints; permit distinct scopes before declaring empty lookups exhausted.
+
 ## 1.3.18
 
 - Recover malformed or silently dropped provider tool calls using bound-tool feedback, independently of server adapters; keep protocol errors distinct from blank answers.
