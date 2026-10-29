@@ -119,3 +119,24 @@ test("commandResultFailed recognizes executor failures, policy denials, and API 
   assert.equal(commandResultFailed('{"error":{"message":"invalid event"}}'), true);
   assert.equal(commandResultFailed('{"kind":"calendar#event","status":"confirmed"}'), false);
 });
+
+
+test("read-family limits allow documentation and a corrected child command", async () => {
+  const commands = [];
+  const guarded = wrapWithLoopDetection("executeAux4", {
+    description: "execute aux4",
+    schema: z.object({ command: z.string() }),
+    invoke: async ({ command }) => {
+      commands.push(command);
+      return command.includes("--help") || command.endsWith("-h")
+        ? "get --recordId: read a record" : '{"records":[{"id":"r7"}]}';
+    }
+  });
+  await guarded.invoke({ command: "records list --query first" });
+  await guarded.invoke({ command: "records list --query second" });
+  assert.match(String(await guarded.invoke({ command: "records list --query third" })), /identical evidence twice/);
+  assert.match(String(await guarded.invoke({ command: "records list --help" })), /recordId/);
+  assert.match(String(await guarded.invoke({ command: "records list -h" })), /recordId/);
+  assert.match(String(await guarded.invoke({ command: "records get --recordId r7" })), /r7/);
+  assert.equal(commands.length, 5);
+});

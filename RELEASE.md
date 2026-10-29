@@ -5,6 +5,10 @@
 
 
 
+## 1.3.11
+
+- Allow command help after repeated read evidence so invalid parameters can be corrected without bypassing duplicate-call limits.
+
 ## 1.3.10
 
 - Stop a third read-only call when the same command path has already returned identical evidence twice despite changed arguments; successful mutations clear this guard.

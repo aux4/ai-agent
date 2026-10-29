@@ -1700,6 +1700,8 @@ function readCommandFamily(name, args) {
     return null;
   }
   if (argv[0] === "aux4") argv = argv.slice(1);
+  // Documentation is new recovery evidence, not another data lookup.
+  if (argv.includes("--help") || argv.includes("-h")) return null;
   const firstFlag = argv.findIndex(arg => arg.startsWith("--"));
   const commandPath = (firstFlag < 0 ? argv : argv.slice(0, firstFlag)).join(" ").trim();
   if (!commandPath || MUTATION_VERB.test(commandPath) || commandPath.split(/\s+/).at(-1) === "run") return null;
