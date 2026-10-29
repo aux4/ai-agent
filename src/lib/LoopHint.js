@@ -65,3 +65,27 @@ export function emptyLookupRecovery(command, result) {
     || !lookup.argv.some(word => /^--(?:query|filter|search|q|where|timeMin|timeMax|labelIds)(?:=|$)/i.test(word))) return null;
   return { family: lookup.family, message: "A filtered lookup returned no matching records. That only rules out the current filters, not the named target. Try one materially broader lookup or inspect candidates with fewer optional filters, preserving every explicit user constraint. Do not repeat the same filters. If that also yields no relevant evidence, report what is missing." };
 }
+
+// A tool can explicitly report that a form is waiting for data. Authorization
+// to submit does not supply those values; this feedback never confirms a call.
+export function requiredInputRecovery(result) {
+  let data;
+  try { data = typeof result === "string" ? JSON.parse(result) : result; } catch { return null; }
+  if (!data || data.status !== "needs-input" || !Array.isArray(data.confirmation?.emptyFields)) return null;
+  const fields = data.confirmation.emptyFields.filter(value => typeof value === "string" && value.trim()).map(value => value.trim().slice(0, 120)).slice(0, 12);
+  if (!fields.length) return null;
+  return {
+    key: JSON.stringify([data.confirmation.target || "", [...fields].sort()]),
+    message: `The tool is waiting for required values: ${fields.join("; ")}. Authorization to submit does not supply missing data. Use values already present in the original request or successful evidence. If a required value is still absent, use one relevant available source; do not keep querying the same page or retry a denied source. If it cannot be obtained, stop with BLOCKED and name the missing value. Do not confirm or submit with empty or invented required values.`
+  };
+}
+
+
+export function unansweredLookupRecovery(command, result) {
+  const lookup=lookupPath(command);
+  if (!lookup) return null;
+  let data;
+  try { data=typeof result === "string" ? JSON.parse(result) : result; } catch { return null; }
+  if (!data || data.answered !== false) return null;
+  return {family:lookup.family,message:"The lookup explicitly did not answer the question. Matching headings or labels do not establish the missing value. Inspect a relevant source or use one materially different available source, preserving the request's constraints. Do not keep rephrasing the same question against the same content. If the required fact is still unavailable, stop with BLOCKED and name it; do not invent it."};
+}

@@ -8,7 +8,7 @@ import { readFile, asJson } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
 import Tools, { createTools } from "./Tools.js";
-import { emptyLookupRecovery } from "./LoopHint.js";
+import { emptyLookupRecovery, requiredInputRecovery, unansweredLookupRecovery } from "./LoopHint.js";
 import { parseToolsAllowList, applyToolsAllowList } from "./ToolBindings.js";
 import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
@@ -39,6 +39,7 @@ class Prompt {
     this.toolCallCount = 0;
     this.modelDiagnostics = [];
     this._emptyLookupHinted = new Set();
+    this._requiredInputHinted = new Set();
     this.mcpClient = null;
     this.apiType = config.api || "chat";
 
@@ -508,10 +509,15 @@ class Prompt {
         this.messages.push(...toolResults);
         for (let index = 0; index < toolResults.length; index++) {
           const call = response.tool_calls[index];
-          const recovery = call.name === "executeAux4" ? emptyLookupRecovery(call.args?.command, toolResults[index].content) : null;
+          const recovery = call.name === "executeAux4" ? (emptyLookupRecovery(call.args?.command, toolResults[index].content) || unansweredLookupRecovery(call.args?.command, toolResults[index].content)) : null;
           if (recovery && !this._emptyLookupHinted.has(recovery.family)) {
             this._emptyLookupHinted.add(recovery.family);
             this.messages.push({ role: "user", content: recovery.message, timestamp: Date.now() });
+          }
+          const missing = requiredInputRecovery(toolResults[index].content);
+          if (missing && !this._requiredInputHinted.has(missing.key)) {
+            this._requiredInputHinted.add(missing.key);
+            this.messages.push({ role: "user", content: missing.message, timestamp: Date.now() });
           }
         }
         this.saveHistory();

@@ -5,6 +5,10 @@
 
 
 
+## 1.3.20
+
+- Distinguish structured missing required values from authorization, reuse supplied data, and bound missing-value lookup recovery without confirming an action.
+
 ## 1.3.19
 
 - Coach one broader lookup after a filtered miss while preserving the raw result and user constraints; permit distinct scopes before declaring empty lookups exhausted.

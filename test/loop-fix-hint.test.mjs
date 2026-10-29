@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { repeatFixHint, emptyLookupRecovery, isEmptyLookupResult } from "../src/lib/LoopHint.js";
+import { repeatFixHint, emptyLookupRecovery, isEmptyLookupResult, requiredInputRecovery, unansweredLookupRecovery } from "../src/lib/LoopHint.js";
 
 test("repeatFixHint names the missing flag from aux4's own error", () => {
   const hint = repeatFixHint("Error executing command: Missing required parameter --messageId: The message ID to retrieve");
@@ -43,4 +43,22 @@ test("filtered misses get bounded broadening advice without changing the result"
   assert.equal(emptyLookupRecovery('records search --query strict', '{"records":[{"id":"r7"}]}'), null);
   assert.equal(emptyLookupRecovery('records search --query strict', '{"id":"r7","errors":[]}'), null);
   assert.equal(isEmptyLookupResult('records search --query strict','{"data":{"items":[]}}'), true);
+});
+
+
+test("required-input advice needs a structured missing-field result",()=>{
+  for(const value of ['not JSON',{}, {status:'done',confirmation:{emptyFields:['token']}}, {status:'needs-input',confirmation:{emptyFields:[]}}, {status:'needs-input',confirmation:{emptyFields:[null,7,'']}}])
+    assert.equal(requiredInputRecovery(value),null);
+  const result=requiredInputRecovery({status:'needs-input',confirmation:{target:'form',emptyFields:['Badge number']}});
+  assert.match(result.message,/Badge number/);
+  assert.match(result.message,/Do not confirm or submit with empty or invented/);
+});
+
+
+test("explicit unanswered lookup feedback does not treat matches as an answer",()=>{
+  const input={answered:false,matches:[{text:'Application form'}]};
+  assert.match(unansweredLookupRecovery('forms find --question "badge number"',input).message,/headings or labels do not establish/);
+  assert.equal(unansweredLookupRecovery('forms find',{...input,answered:true}),null);
+  assert.equal(unansweredLookupRecovery('forms update',input),null);
+  assert.equal(unansweredLookupRecovery('forms find','not JSON'),null);
 });

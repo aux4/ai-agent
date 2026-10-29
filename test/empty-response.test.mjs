@@ -141,3 +141,28 @@ test("repeated empty lookups get only one broadening hint per command family", a
   assert.equal(invoked,2);
   assert.equal(prompt.messages.filter(message=>String(message.content).startsWith('A filtered lookup returned')).length,1);
 });
+
+
+test("missing-input feedback preserves the contract and never confirms an action", async () => {
+  const contract = JSON.stringify({status:'needs-input',confirmation:{target:'application form',emptyFields:['Badge number'],next:'aux4 forms run --field confirm=yes'}});
+  const call = id => new AIMessage({content:'',tool_calls:[{name:'executeAux4',args:{command:'forms run --goal apply'},id,type:'tool_call'}]});
+  const {prompt,calls}=fakePrompt([call('one'),call('two'),new AIMessage('BLOCKED: Badge number is missing.')]);
+  const invoked=[];
+  prompt.tools.executeAux4={invoke:async args=>{invoked.push(args.command);return contract;}};
+  assert.match(await prompt.execute(),/Badge number/);
+  assert.equal(calls(),3);
+  assert.deepEqual(invoked,['forms run --goal apply','forms run --goal apply']);
+  assert.deepEqual(prompt.messages.filter(message=>message.role==='tool').map(message=>message.content),[contract,contract]);
+  assert.equal(prompt.messages.filter(message=>String(message.content).startsWith('The tool is waiting for required values:')).length,1);
+});
+
+
+test("unanswered-lookup advice preserves source matches and executes no extra lookup",async()=>{
+  const raw=JSON.stringify({answered:false,matches:[{text:'Application form'}]});
+  const call=new AIMessage({content:'',tool_calls:[{name:'executeAux4',args:{command:'forms find --question "badge number"'},id:'one',type:'tool_call'}]});
+  const {prompt,calls}=fakePrompt([call,new AIMessage('BLOCKED: Badge number is not available.')]);
+  let invoked=0;prompt.tools.executeAux4={invoke:async()=>{invoked++;return raw;}};
+  await prompt.execute();assert.equal(calls(),2);assert.equal(invoked,1);
+  assert.equal(prompt.messages.find(message=>message.role==='tool').content,raw);
+  assert.match(prompt.messages.find(message=>String(message.content).startsWith('The lookup explicitly')).content,/Do not keep rephrasing/);
+});
