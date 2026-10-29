@@ -5,6 +5,10 @@
 
 
 
+## 1.3.13
+
+- Include bounded local parameter help with CLI parser errors; preserve the error and never replay the failed action automatically.
+
 ## 1.3.12
 
 - Include actionable CLI recovery guidance on the first parameter error, preserving the original failure and avoiding unrelated repeated lookups.

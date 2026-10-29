@@ -1,5 +1,6 @@
 import fs from "fs";
 import { repeatFixHint, correctedCommand } from "./LoopHint.js";
+import { parameterErrorHelp } from "./ParameterHelp.js";
 import path from "path";
 import os from "os";
 import { spawn, spawnSync } from "child_process";
@@ -572,7 +573,8 @@ export const executeAux4CliTool = tool(
       if (error.timedOut) {
         return formatTimeoutMessage(command, timeout, error);
       }
-      return withCommandFix(`Error executing command: ${error.message}`, command);
+      return withCommandFix(`Error executing command: ${error.message}`, command)
+        + parameterErrorHelp(argv, error.message, cwd);
     }
   },
   {
