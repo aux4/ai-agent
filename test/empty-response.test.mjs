@@ -50,3 +50,34 @@ test("three consecutive empty replies stop and retain diagnostic evidence", asyn
     assert.equal(data.messages.some(message => JSON.stringify(message).includes('invalidToolCalls')), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+const protocolFailure = id => new AIMessage({ content: '', tool_calls: [{
+  name: '__tool_protocol_error__', id, type: 'tool_call',
+  args: { error: 'No function provided.', raw: 'call:cloud records list{query:active}' }
+}] });
+
+test("protocol errors give model-visible repair feedback without executing an inferred command", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'protocol-repair-'));
+  try {
+    const file = path.join(dir, 'history.json');
+    const { prompt, calls } = fakePrompt([protocolFailure('bad'), lookup('fixed'), new AIMessage('done')], file);
+    let invalidInvocations = 0;
+    prompt.tools.__tool_protocol_error__ = { invoke: async () => { invalidInvocations++; } };
+    assert.equal(await prompt.execute(), 'done');
+    assert.equal(calls(), 3);
+    assert.equal(invalidInvocations, 0);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const feedback = data.messages.find(message => message.role === 'tool').content;
+    assert.match(feedback, /No action was run/);
+    assert.match(feedback, /Available tools: lookup/);
+    assert.match(feedback, /call:cloud records list/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("unrepairable tool protocol stops after three rejected requests", async () => {
+  const { prompt, calls } = fakePrompt([protocolFailure('one'), protocolFailure('two'), protocolFailure('three')]);
+  assert.match(await prompt.execute(), /Stopped:/);
+  assert.equal(calls(), 3);
+  assert.match(prompt.messages.findLast(message => message.role === 'tool').content, /Aborting:/);
+});

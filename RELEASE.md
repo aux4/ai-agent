@@ -5,6 +5,10 @@
 
 
 
+## 1.3.17
+
+- Return explicit, bounded repair feedback for malformed or unbound tool requests; reserved protocol errors never execute a command, even if a tool uses the reserved name.
+
 ## 1.3.16
 
 - Reset the consecutive-empty-response counter after tool calls and retain bounded empty-response diagnostics outside the model context.

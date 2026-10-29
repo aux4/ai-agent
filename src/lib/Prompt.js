@@ -395,16 +395,31 @@ class Prompt {
             console.error(`[tool] ${toolCall.name}(${argsPreview})`);
             const startTime = Date.now();
             try {
-              const tool = this.tools[toolCall.name];
+              const protocolError = toolCall.name === "__tool_protocol_error__";
+              const tool = protocolError ? null : this.tools[toolCall.name];
               if (!tool) {
-                console.error(`[tool] ${toolCall.name} => unknown tool`);
-                return {
+                this._unknownToolRetried = (this._unknownToolRetried || 0) + 1;
+                const available = Object.keys(this.tools).filter(name => name !== "__tool_protocol_error__");
+                const details = protocolError
+                  ? `The generated tool request could not be parsed: ${String(toolCall.args?.error || "invalid syntax").slice(0, 500)}. No action was run. Rejected syntax: ${String(toolCall.args?.raw || "").slice(0, 4000)}`
+                  : `Unknown tool "${toolCall.name}". No action was run.`;
+                const guidance = this.tools.executeAux4
+                  ? ' For a CLI command, call executeAux4 with a JSON object containing its command string. A CLI command path is not a tool name.'
+                  : ' Call one of the bound tools using its declared argument schema.';
+                const entry = {
                   role: "tool",
-                  content: `Error: Unknown tool "${toolCall.name}". Available tools: ${Object.keys(this.tools).join(", ")}`,
+                  content: `Error: ${details} Available tools: ${available.join(", ")}.${guidance}`,
                   tool_call_id: toolCall.id,
                   name: toolCall.name,
                   timestamp: Date.now()
                 };
+                if (this._unknownToolRetried >= 3) {
+                  entry.content = `Aborting: the same call has been refused for invalid tool protocol ${this._unknownToolRetried} times. ${entry.content}`;
+                  entry.loopAbort = true;
+                  entry.loopAbortCall = { name: toolCall.name, args: toolCall.args };
+                }
+                console.error(`[tool] ${toolCall.name} => invalid tool request`);
+                return entry;
               }
 
               // Count consequential tool calls toward the policy budget and pass the
@@ -416,6 +431,7 @@ class Prompt {
               }
 
               const toolResponse = await tool.invoke(invokeArgs);
+              this._unknownToolRetried = 0;
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
               const preview = typeof toolResponse === "string" ? toolResponse.slice(0, 100) : "";
               console.error(`[tool] ${toolCall.name} => done (${elapsed}s) ${preview}`);
