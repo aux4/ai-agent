@@ -440,19 +440,30 @@ function executeWithTimeout(cmd, { argv, stdin, timeout, cwd } = {}) {
   });
 }
 
-function readOutputFile(filePath, maxBytes) {
+export function readOutputFile(filePath, maxBytes) {
   try {
     const stat = fs.statSync(filePath);
     if (stat.size === 0) return "";
     if (stat.size <= maxBytes) {
       return fs.readFileSync(filePath, "utf-8");
     }
-    // Read the last maxBytes
+    // Keep both the start and end. Structured command results often put a
+    // confirmation contract or status at the start, while useful diagnostics
+    // and page context are near the end.
+    const marker = "\n[...truncated...]\n";
+    const payloadBytes = Math.max(0, maxBytes - Buffer.byteLength(marker));
+    const headBytes = Math.ceil(payloadBytes / 2);
+    const tailBytes = payloadBytes - headBytes;
     const fd = fs.openSync(filePath, "r");
-    const buffer = Buffer.alloc(maxBytes);
-    fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
-    fs.closeSync(fd);
-    return "[...truncated...]\n" + buffer.toString("utf-8");
+    try {
+      const head = Buffer.alloc(headBytes);
+      const tail = Buffer.alloc(tailBytes);
+      if (headBytes > 0) fs.readSync(fd, head, 0, headBytes, 0);
+      if (tailBytes > 0) fs.readSync(fd, tail, 0, tailBytes, stat.size - tailBytes);
+      return head.toString("utf-8") + marker + tail.toString("utf-8");
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch {
     return "";
   }
@@ -1674,6 +1685,27 @@ export function callShape(name, args) {
     .replace(/--field[= ]+(?:'[^']*'|\\"(?:[^"\\]|\\\\.)*?\\"|"(?:[^"\\]|\\.)*"|\S+)/g, "--field <v>")
     .replace(/--session[= ]+'?[A-Za-z0-9-]+'?/g, "--session <id>");
 }
+
+// A command group can return the same help or read result while a model keeps
+// changing unrelated flags. Track identical evidence per command path so a
+// third variation can be stopped before it consumes another tool call. Keep
+// this away from actions (including browser runs), whose unchanged-looking
+// responses may follow real mutations.
+function readCommandFamily(name, args) {
+  if (name !== "executeAux4" || typeof args?.command !== "string") return null;
+  let argv;
+  try {
+    argv = parseCommandArgs(args.command);
+  } catch {
+    return null;
+  }
+  if (argv[0] === "aux4") argv = argv.slice(1);
+  const firstFlag = argv.findIndex(arg => arg.startsWith("--"));
+  const commandPath = (firstFlag < 0 ? argv : argv.slice(0, firstFlag)).join(" ").trim();
+  if (!commandPath || MUTATION_VERB.test(commandPath) || commandPath.split(/\s+/).at(-1) === "run") return null;
+  return commandPath;
+}
+
 export function resultShape(result) {
   return String(result)
     .replace(/[0-9a-f]{8,}/gi, "<id>")
@@ -1684,13 +1716,18 @@ export function resultShape(result) {
 export function wrapWithLoopDetection(name, underlyingTool) {
   const seen = new Map();
   const shapes = new Map();
+  const readResults = new Map();
   const successfulChanges = [];
+  const pendingChanges = [];
 
   return tool(
     async (args) => {
       const cleanArgs = { ...args };
       delete cleanArgs.__policyCallId;
       const target = mutationTarget(name, cleanArgs);
+      if (target && pendingChanges.some(prior => sameMutationTarget(prior, target))) {
+        return "Not run: a change of this kind for this target is already running. Wait for its result, then read the current state before deciding whether anything else is needed.";
+      }
       if (target && successfulChanges.some(prior => sameMutationTarget(prior, target))) {
         return "Not run: a change of this kind for this target already succeeded in this run. Read the current state and stop; do not issue another change to it.";
       }
@@ -1744,17 +1781,40 @@ export function wrapWithLoopDetection(name, underlyingTool) {
           + `If a value it needs cannot be found, stop and say exactly which value is missing.`;
       }
 
-      const result = await underlyingTool.invoke(args);
-      const asText = String(result);
-      if (target && !commandResultFailed(asText)) successfulChanges.push(target);
-      seen.set(key, prior && prior.result === asText
-        ? { count: prior.count + 1, result: asText }
-        : { count: 1, result: asText });
-      const sig = resultShape(asText);
-      shapes.set(shapeKey, shapePrior && shapePrior.sig === sig
-        ? { count: shapePrior.count + 1, sig, result: asText }
-        : { count: 1, sig, result: asText });
-      return result;
+      const readFamily = readCommandFamily(name, cleanArgs);
+      const familyResults = readFamily && readResults.get(readFamily);
+      const repeatedEvidence = familyResults && [...familyResults.entries()].find(([, count]) => count >= 2);
+      if (repeatedEvidence) {
+        return `Not run: ${readFamily} has already returned identical evidence twice after different arguments. Use that result to choose a materially different command or source; if it was group help, run one of the listed subcommands before adding flags.`;
+      }
+
+      if (target) pendingChanges.push(target);
+      try {
+        const result = await underlyingTool.invoke(args);
+        const asText = String(result);
+        if (target && !commandResultFailed(asText)) {
+          successfulChanges.push(target);
+          readResults.clear();
+        }
+        if (readFamily && !commandResultFailed(asText)) {
+          const results = readResults.get(readFamily) || new Map();
+          results.set(asText, (results.get(asText) || 0) + 1);
+          readResults.set(readFamily, results);
+        }
+        seen.set(key, prior && prior.result === asText
+          ? { count: prior.count + 1, result: asText }
+          : { count: 1, result: asText });
+        const sig = resultShape(asText);
+        shapes.set(shapeKey, shapePrior && shapePrior.sig === sig
+          ? { count: shapePrior.count + 1, sig, result: asText }
+          : { count: 1, sig, result: asText });
+        return result;
+      } finally {
+        if (target) {
+          const reservation = pendingChanges.indexOf(target);
+          if (reservation >= 0) pendingChanges.splice(reservation, 1);
+        }
+      }
     },
     {
       name,

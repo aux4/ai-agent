@@ -164,6 +164,20 @@ test("wrapWithHooks: a passing before hook lets the real tool run", async () => 
   assert.equal(getCalls(), 1);
 });
 
+test("wrapWithHooks exposes the raw executeAux4 command line to hooks", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hooks-command-line-test-"));
+  const marker = path.join(tmp, "command-line.txt");
+  const { fake } = fakeTool("executeAux4", () => "ran for real");
+  const hooks = loadHooks(writeHooksFile([
+    { tool: "executeAux4", command: "aux4/version", before: [`file:${marker}:value(__commandLine)`] }
+  ]));
+  const wrapped = wrapWithHooks("executeAux4", fake, { hooks, request: "do it", historyFile: "", session: "s1" });
+
+  assert.equal(await wrapped.invoke({ command: "aux4 version" }), "ran for real");
+  assert.equal(fs.readFileSync(marker, "utf8").trim().replace(/^['"]|['"]$/g, ""), "aux4 version");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test("wrapWithHooks: replace hook returns its own output, real tool never runs", async () => {
   const { fake, getCalls } = fakeTool("executeAux4", () => "ran for real");
   const hooks = loadHooks(writeHooksFile([

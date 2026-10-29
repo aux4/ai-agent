@@ -5,6 +5,15 @@
 
 
 
+## 1.3.10
+
+- Stop a third read-only call when the same command path has already returned identical evidence twice despite changed arguments; successful mutations clear this guard.
+
+## 1.3.9
+
+- Preserve the beginning and end of large command results so structured status and confirmation data remain available to the agent.
+- Expose the raw command line to hooks and reserve a mutation target before executing it, preventing repeated-read gaps and parallel duplicate writes.
+
 ## 1.3.8
 
 - Successful mutations are recorded by command and stable target. A later call to the same target is refused even if cosmetic fields or argument order change; failed mutations remain retryable.

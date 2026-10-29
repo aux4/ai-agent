@@ -220,16 +220,18 @@ function flattenParams(callParams) {
 }
 
 // Context variables a tool call has, parallel to core's __command/__scope/__package:
-// __tool, __command (executeAux4 only), __request (the user's request this round),
+// __tool, __command (resolved executeAux4 path), __commandLine (raw executeAux4 command),
+// __request (the user's request this round),
 // __history (path to the history file -- a hook can read prior tool results from it),
 // __session.
 // (`after`/`error` steps additionally see `__response`/`__error`/`__exitCode`, set just
 // before they run -- see wrapWithHooks.)
-export function buildHookContext({ toolName, commandPath, callParams, request, historyFile, session }) {
+export function buildHookContext({ toolName, commandPath, commandLine, callParams, request, historyFile, session }) {
   return {
     ...flattenParams(callParams),
     __tool: toolName,
     __command: commandPath || "",
+    __commandLine: commandLine || "",
     __request: request || "",
     __history: historyFile || "",
     __session: session || ""
@@ -357,6 +359,7 @@ export function wrapWithHooks(name, underlyingTool, hooksContext) {
       const vars = buildHookContext({
         toolName: name,
         commandPath,
+        commandLine: name === "executeAux4" && args && typeof args.command === "string" ? args.command : "",
         callParams,
         request: hooksContext.request,
         historyFile: liveHistoryFile(hooksContext),
