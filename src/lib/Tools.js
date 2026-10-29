@@ -1,6 +1,6 @@
 import fs from "fs";
 import { repeatFixHint, correctedCommand } from "./LoopHint.js";
-import { parameterErrorHelp } from "./ParameterHelp.js";
+import { parameterErrorHelp, parameterHelpArgs } from "./ParameterHelp.js";
 import path from "path";
 import os from "os";
 import { spawn, spawnSync } from "child_process";
@@ -547,6 +547,13 @@ function withCommandFix(message, command) {
   return fixed ? `${message}\nRun this instead (executeAux4 command): ${fixed}` : message;
 }
 
+function commandFailureMessage(error, command, argv, cwd, permissions) {
+  const message = withCommandFix(`Error executing command: ${error.message}`, command);
+  const helpArgs = parameterHelpArgs(argv, error.message);
+  if (permissions && helpArgs && checkPermission(helpArgs.join(" "), permissions) !== "allow") return message;
+  return message + parameterErrorHelp(argv, error.message, cwd);
+}
+
 export const executeAux4CliTool = tool(
   async ({ command, stdin, timeout, cwd }) => {
     // Check system-level deny first (cannot be overridden)
@@ -573,8 +580,7 @@ export const executeAux4CliTool = tool(
       if (error.timedOut) {
         return formatTimeoutMessage(command, timeout, error);
       }
-      return withCommandFix(`Error executing command: ${error.message}`, command)
-        + parameterErrorHelp(argv, error.message, cwd);
+      return commandFailureMessage(error, command, argv, cwd);
     }
   },
   {
@@ -702,7 +708,7 @@ export const createExecuteAux4Tool = (permissions) => tool(
       if (error.timedOut) {
         return formatTimeoutMessage(command, timeout, error);
       }
-      return withCommandFix(`Error executing command: ${error.message}`, command);
+      return commandFailureMessage(error, command, argv, cwd, permissions);
     }
   },
   {

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { parameterHelpArgs, parameterErrorHelp } from "../src/lib/ParameterHelp.js";
-import { executeAux4CliTool } from "../src/lib/Tools.js";
+import { executeAux4CliTool, createExecuteAux4Tool } from "../src/lib/Tools.js";
 
 test("CLI parser errors request only the original command's help", () => {
   assert.deepEqual(parameterHelpArgs(['aux4', 'records', 'get', '--id', 'r7'], 'Unknown parameter --id'), ['records', 'get', '--help']);
@@ -43,11 +43,19 @@ else { console.error('Unknown parameter --id'); process.exitCode = 1; }
 `, { mode: 0o755 });
   process.env.PATH = dir + path.delimiter + previous;
   try {
-    const result = String(await executeAux4CliTool.invoke({ command: 'records get --id r7' }));
-    assert.match(result, /Error executing command: Unknown parameter --id/);
-    assert.match(result, /--recordId <arg>/);
+    for (const commandTool of [executeAux4CliTool, createExecuteAux4Tool({ allow: ['*'] })]) {
+      const result = String(await commandTool.invoke({ command: 'records get --id r7' }));
+      assert.match(result, /Error executing command: Unknown parameter --id/);
+      assert.match(result, /--recordId <arg>/);
+    }
+    const restricted = createExecuteAux4Tool({ allow: ['records get --id *'] });
+    const deniedHelp = String(await restricted.invoke({ command: 'records get --id r7' }));
+    assert.match(deniedHelp, /Unknown parameter/);
+    assert.doesNotMatch(deniedHelp, /Local command parameter reference/);
     assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse), [
-      ['records', 'get', '--id', 'r7'], ['records', 'get', '--help']
+      ['records', 'get', '--id', 'r7'], ['records', 'get', '--help'],
+      ['records', 'get', '--id', 'r7'], ['records', 'get', '--help'],
+      ['records', 'get', '--id', 'r7']
     ]);
   } finally {
     process.env.PATH = previous;

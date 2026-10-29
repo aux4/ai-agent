@@ -5,6 +5,10 @@
 
 
 
+## 1.3.14
+
+- Apply parameter diagnostics to permission-configured tools as well, respecting command-help permissions.
+
 ## 1.3.13
 
 - Include bounded local parameter help with CLI parser errors; preserve the error and never replay the failed action automatically.
