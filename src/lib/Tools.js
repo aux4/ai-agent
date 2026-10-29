@@ -1727,6 +1727,7 @@ export function wrapWithLoopDetection(name, underlyingTool) {
   const seen = new Map();
   const shapes = new Map();
   const readResults = new Map();
+  const refusedReads = new Map();
   const successfulChanges = [];
   const pendingChanges = [];
 
@@ -1795,7 +1796,15 @@ export function wrapWithLoopDetection(name, underlyingTool) {
       const familyResults = readFamily && readResults.get(readFamily);
       const repeatedEvidence = familyResults && [...familyResults.entries()].find(([, count]) => count >= 2);
       if (repeatedEvidence) {
-        return `Not run: ${readFamily} has already returned identical evidence twice after different arguments. Use that result to choose a materially different command or source; if it was group help, run one of the listed subcommands before adding flags.`;
+        const refused = (refusedReads.get(readFamily) || 0) + 1;
+        refusedReads.set(readFamily, refused);
+        const evidence = repeatedEvidence[0].slice(0, 1200);
+        if (refused >= LOOP_ABORT_AFTER) {
+          const error = new Error(`Aborting: the same action has returned the same result twice and ${refused} further reads were refused. The agent is not making progress. Existing evidence:\n${evidence}`);
+          error.loopAbort = true;
+          throw error;
+        }
+        return `Not run: ${readFamily} has already returned identical evidence twice after different arguments. Reuse the existing facts to finish the remaining work; choose a materially different source only if a required fact is absent. If this was group help, run one of the listed subcommands before adding flags.\nExisting evidence:\n${evidence}`;
       }
 
       if (target) pendingChanges.push(target);
@@ -1805,6 +1814,7 @@ export function wrapWithLoopDetection(name, underlyingTool) {
         if (target && !commandResultFailed(asText)) {
           successfulChanges.push(target);
           readResults.clear();
+          refusedReads.clear();
         }
         if (readFamily && !commandResultFailed(asText)) {
           const results = readResults.get(readFamily) || new Map();

@@ -153,3 +153,29 @@ test("the first parameter error supplies recovery guidance without retrying the 
   assert.match(result, /exact --help/);
   assert.equal(calls, 1);
 });
+
+
+test("read-family refusals retain facts and terminate instead of growing forever", async () => {
+  let calls = 0;
+  const guarded = wrapWithLoopDetection("executeAux4", {
+    description: "execute aux4", schema: z.object({ command: z.string() }),
+    invoke: async () => { calls++; return '{"records":[{"id":"r7","status":"inactive"}]}'; }
+  });
+  await guarded.invoke({ command: "records list --query first" });
+  await guarded.invoke({ command: "records list --query second" });
+  let aborted = false;
+  for (let i = 0; i < 10; i++) {
+    try {
+      const result = String(await guarded.invoke({ command: `records list --query retry-${i}` }));
+      assert.match(result, /Existing evidence:/);
+      assert.match(result, /r7/);
+    } catch (error) {
+      assert.equal(error.loopAbort, true);
+      assert.match(error.message, /not making progress/);
+      aborted = true;
+      break;
+    }
+  }
+  assert.equal(aborted, true);
+  assert.equal(calls, 2);
+});

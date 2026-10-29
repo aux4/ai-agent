@@ -5,6 +5,10 @@
 
 
 
+## 1.3.15
+
+- Bound repeated-read refusals and return the already observed facts instead of letting refusal loops grow indefinitely.
+
 ## 1.3.14
 
 - Apply parameter diagnostics to permission-configured tools as well, respecting command-help permissions.
