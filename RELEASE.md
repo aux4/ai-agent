@@ -5,6 +5,10 @@
 
 
 
+## 1.3.16
+
+- Reset the consecutive-empty-response counter after tool calls and retain bounded empty-response diagnostics outside the model context.
+
 ## 1.3.15
 
 - Bound repeated-read refusals and return the already observed facts instead of letting refusal loops grow indefinitely.

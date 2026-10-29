@@ -36,6 +36,7 @@ class Prompt {
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
+    this.modelDiagnostics = [];
     this.mcpClient = null;
     this.apiType = config.api || "chat";
 
@@ -146,6 +147,7 @@ class Prompt {
     if (Array.isArray(historyData)) {
       this.messages = this.messages.concat(historyData);
     } else if (historyData && typeof historyData === "object") {
+      if (Array.isArray(historyData.modelDiagnostics)) this.modelDiagnostics = historyData.modelDiagnostics.slice(-20);
       if (Array.isArray(historyData.messages)) {
         this.messages = this.messages.concat(historyData.messages);
       }
@@ -338,6 +340,7 @@ class Prompt {
       this._accumulateTokenUsage(response);
 
       if (response.tool_calls && response.tool_calls.length > 0) {
+        this._emptyRetried = 0;
         this.messages.push({ role: "assistant_with_tool", content: response, timestamp: Date.now() });
         this.saveHistory();
 
@@ -487,6 +490,15 @@ class Prompt {
       // mid-task. Terminating here ends the run silently, which reads downstream as "the agent
       // decided it was finished" when it simply died. Retry once before believing it.
       if (!answer || !answer.trim()) {
+        this.modelDiagnostics.push({
+          kind: "empty-response", timestamp: Date.now(),
+          finishReason: response.response_metadata?.finish_reason || response.response_metadata?.stop_reason || "",
+          outputTokens: response.response_metadata?.tokenUsage?.completionTokens || response.usage_metadata?.output_tokens || 0,
+          invalidToolCalls: (response.invalid_tool_calls || []).map(call => ({
+            name: call.name, args: String(call.args || "").slice(0, 2000), error: String(call.error || "").slice(0, 500)
+          }))
+        });
+        this.modelDiagnostics = this.modelDiagnostics.slice(-20);
         this._emptyRetried = (this._emptyRetried || 0) + 1;
         if (this._emptyRetried <= 2) {
           // Retrying the IDENTICAL context reproduces the identical stall -- observed failing
@@ -673,7 +685,8 @@ class Prompt {
 
       const data = JSON.stringify({
         messages: simplifiedMessages,
-        tokenUsage: this.tokenUsage
+        tokenUsage: this.tokenUsage,
+        ...(this.modelDiagnostics.length ? { modelDiagnostics: this.modelDiagnostics } : {})
       });
       if (data.length < 3) return;
 
