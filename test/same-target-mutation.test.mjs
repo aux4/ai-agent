@@ -140,3 +140,16 @@ test("read-family limits allow documentation and a corrected child command", asy
   assert.match(String(await guarded.invoke({ command: "records get --recordId r7" })), /r7/);
   assert.equal(commands.length, 5);
 });
+
+
+test("the first parameter error supplies recovery guidance without retrying the tool", async () => {
+  let calls = 0;
+  const guarded = wrapWithLoopDetection("executeAux4", {
+    description: "execute aux4", schema: z.object({ command: z.string() }),
+    invoke: async () => { calls++; return "Error executing command: Unknown parameter --id"; }
+  });
+  const result = String(await guarded.invoke({ command: "records get --id r7" }));
+  assert.match(result, /Unknown parameter --id/);
+  assert.match(result, /exact --help/);
+  assert.equal(calls, 1);
+});

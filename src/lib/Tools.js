@@ -1810,7 +1810,10 @@ export function wrapWithLoopDetection(name, underlyingTool) {
         shapes.set(shapeKey, shapePrior && shapePrior.sig === sig
           ? { count: shapePrior.count + 1, sig, result: asText }
           : { count: 1, sig, result: asText });
-        return result;
+        // Give actionable CLI feedback on the first error, before a model
+        // spends its budget repeating unrelated successful lookups.
+        const fix = commandResultFailed(asText) ? repeatFixHint(asText, args?.command) : "";
+        return fix ? `${asText}\n\nRecovery: ${fix}` : result;
       } finally {
         if (target) {
           const reservation = pendingChanges.indexOf(target);

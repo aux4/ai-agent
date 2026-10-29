@@ -5,6 +5,10 @@
 
 
 
+## 1.3.12
+
+- Include actionable CLI recovery guidance on the first parameter error, preserving the original failure and avoiding unrelated repeated lookups.
+
 ## 1.3.11
 
 - Allow command help after repeated read evidence so invalid parameters can be corrected without bypassing duplicate-call limits.

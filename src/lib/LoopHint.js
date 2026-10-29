@@ -14,6 +14,9 @@ export function repeatFixHint(result, command = "") {
   }
   const unknown = text.match(/Unknown parameter (--[\w.-]+), did you mean (--[\w.-]+)\?/);
   if (unknown) return `The error names the fix: use ${unknown[2]} instead of ${unknown[1]}, then run it again.`;
+  if (/(?:Unknown|Unsupported|Unrecognized|Unexpected) (?:parameter|option|flag)\s*:?\s*--[\w.-]+/i.test(text)) {
+    return "Read this command\'s exact --help, remove or replace the rejected option, then continue. Do not repeat already successful lookups to repair a parameter error.";
+  }
   const missing = text.match(/Missing required parameter (--[\w.-]+)/);
   if (missing) return `The error names the fix: the call needs ${missing[1]} <value>. Add it (if you passed the value under another flag name, rename that flag to ${missing[1]}), then run it again.`;
   return "";
