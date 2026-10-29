@@ -71,11 +71,12 @@ export function emptyLookupRecovery(command, result) {
 export function requiredInputRecovery(result) {
   let data;
   try { data = typeof result === "string" ? JSON.parse(result) : result; } catch { return null; }
-  if (!data || data.status !== "needs-input" || !Array.isArray(data.confirmation?.emptyFields)) return null;
-  const fields = data.confirmation.emptyFields.filter(value => typeof value === "string" && value.trim()).map(value => value.trim().slice(0, 120)).slice(0, 12);
+  if (!data || data.status !== "needs-input") return null;
+  const missing = Array.isArray(data.confirmation?.emptyFields) ? data.confirmation.emptyFields : data.needsInput?.kind === "missing" ? [data.needsInput.field?.label] : [];
+  const fields = missing.filter(value => typeof value === "string" && value.trim()).map(value => value.trim().slice(0, 120)).slice(0, 12);
   if (!fields.length) return null;
   return {
-    key: JSON.stringify([data.confirmation.target || "", [...fields].sort()]),
+    key: JSON.stringify([data.confirmation?.target || data.needsInput?.page?.url || "", [...fields].sort()]),
     message: `The tool is waiting for required values: ${fields.join("; ")}. Authorization to submit does not supply missing data. Use values already present in the original request or successful evidence. If a required value is still absent, use one relevant available source; do not keep querying the same page or retry a denied source. If it cannot be obtained, stop with BLOCKED and name the missing value. Do not confirm or submit with empty or invented required values.`
   };
 }

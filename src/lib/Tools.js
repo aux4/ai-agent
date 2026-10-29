@@ -1686,6 +1686,16 @@ export function commandResultFailed(result) {
   }
 }
 
+// A successful tool invocation can still be waiting for data or approval.
+// Only completed effects reserve a target against subsequent mutations.
+export function changeResultCompleted(result) {
+  if (commandResultFailed(result)) return false;
+  try {
+    const data=typeof result === "string" ? JSON.parse(result) : result;
+    return data?.submitted !== false && !["incomplete","needs-input","needs-confirmation","blocked","no-progress"].includes(String(data?.status || "").toLowerCase());
+  } catch { return true; }
+}
+
 export function callShape(name, args) {
   const cleanArgs = { ...args };
   delete cleanArgs.__policyCallId;
@@ -1813,7 +1823,7 @@ export function wrapWithLoopDetection(name, underlyingTool) {
       try {
         const result = await underlyingTool.invoke(args);
         const asText = String(result);
-        if (target && !commandResultFailed(asText)) {
+        if (target && changeResultCompleted(asText)) {
           successfulChanges.push(target);
           readResults.clear();
           refusedReads.clear();

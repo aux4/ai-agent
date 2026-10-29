@@ -5,6 +5,10 @@
 
 
 
+## 1.3.21
+
+- Reserve mutation targets only after completed effects, keeping waiting-input and explicitly unsubmitted workflows resumable; read missing field handoffs as well as confirmation contracts.
+
 ## 1.3.20
 
 - Distinguish structured missing required values from authorization, reuse supplied data, and bound missing-value lookup recovery without confirming an action.

@@ -3,6 +3,7 @@ import test from "node:test";
 import { z } from "zod";
 import {
   commandResultFailed,
+  changeResultCompleted,
   mutationTarget,
   sameMutationTarget,
   wrapWithLoopDetection
@@ -191,4 +192,20 @@ test("two filtered misses cannot prohibit a broader lookup that finds new eviden
   await guarded.invoke({command:'records list --query "still narrow"'});
   assert.deepEqual(JSON.parse(String(await guarded.invoke({command:'records list'}))), {records:[{id:'r7'}]});
   assert.equal(calls,3);
+});
+
+
+test("pending input is not a completed change and a valid continuation remains executable",async()=>{
+  let calls=0;
+  const guarded=wrapWithLoopDetection('executeAux4',{description:'execute aux4',schema:z.object({command:z.string()}),invoke:async()=>++calls===1?'{"status":"needs-input","submitted":false}':'{"status":"done","submitted":true}'});
+  assert.match(String(await guarded.invoke({command:firstCreate})),/needs-input/);
+  assert.match(String(await guarded.invoke({command:cosmeticVariant})),/done/);
+  assert.match(String(await guarded.invoke({command:firstCreate})),/already succeeded/);
+  assert.equal(calls,2);
+});
+
+test("completion detection preserves accepted asynchronous changes but excludes explicitly unsubmitted work",()=>{
+  for(const value of ['{"status":"needs-input"}','{"status":"needs-confirmation"}','{"status":"done","submitted":false}','{"status":"incomplete"}'])assert.equal(changeResultCompleted(value),false);
+  assert.equal(changeResultCompleted('{"status":"pending","id":"job7"}'),true);
+  assert.equal(changeResultCompleted('saved'),true);
 });

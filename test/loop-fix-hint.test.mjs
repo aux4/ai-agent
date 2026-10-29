@@ -62,3 +62,10 @@ test("explicit unanswered lookup feedback does not treat matches as an answer",(
   assert.equal(unansweredLookupRecovery('forms update',input),null);
   assert.equal(unansweredLookupRecovery('forms find','not JSON'),null);
 });
+
+
+test("missing-value feedback also reads the tool's structured field handoff",()=>{
+  const hint=requiredInputRecovery({status:'needs-input',needsInput:{kind:'missing',field:{label:'Contact email'},page:{url:'https://example.test/apply'}}});
+  assert.match(hint.message,/Contact email/);
+  assert.equal(requiredInputRecovery({status:'needs-input',needsInput:{kind:'confirm',field:{label:'Save'}}}),null);
+});
