@@ -5,6 +5,10 @@
 
 
 
+## 1.3.18
+
+- Recover malformed or silently dropped provider tool calls using bound-tool feedback, independently of server adapters; keep protocol errors distinct from blank answers.
+
 ## 1.3.17
 
 - Return explicit, bounded repair feedback for malformed or unbound tool requests; reserved protocol errors never execute a command, even if a tool uses the reserved name.

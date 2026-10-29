@@ -339,6 +339,34 @@ class Prompt {
 
       this._accumulateTokenUsage(response);
 
+      const invalidCalls = response.invalid_tool_calls || [];
+      const lostToolCall = !response.tool_calls?.length && response.response_metadata?.finish_reason === "tool_calls";
+      if (!response.tool_calls?.length && (invalidCalls.length || lostToolCall)) {
+        this._emptyRetried = 0;
+        this._toolProtocolRetried = (this._toolProtocolRetried || 0) + 1;
+        this.modelDiagnostics.push({ kind: "unusable-tool-request", timestamp: Date.now(),
+          finishReason: response.response_metadata?.finish_reason || "",
+          outputTokens: response.response_metadata?.tokenUsage?.completionTokens || response.usage_metadata?.output_tokens || 0,
+          invalidToolCalls: invalidCalls.map(call => ({ name: call.name, args: String(call.args || "").slice(0, 2000), error: String(call.error || "").slice(0, 500) })) });
+        this.modelDiagnostics = this.modelDiagnostics.slice(-20);
+        if (this._toolProtocolRetried >= 3) {
+          const answer = "The provider returned an unusable tool request three times in a row; the task was not completed.";
+          this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
+          this.saveHistory(true);
+          return answer;
+        }
+        const available = Object.keys(this.tools || {}).filter(name => name !== "__tool_protocol_error__");
+        const details = JSON.stringify(invalidCalls.map(call => ({ name: call.name, args: call.args, error: call.error })))
+          .slice(0, 2000).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+        const guidance = this.tools?.executeAux4
+          ? ' A CLI command path is not a tool name: use executeAux4 with {"command":"the CLI command path and flags"}.'
+          : " Use a bound tool's declared argument schema.";
+        this.messages.push({ role: "user", timestamp: Date.now(), content:
+          `The provider returned an unusable tool request. No action was run. Repair the tool name and arguments using a bound tool. Available tools: ${available.join(", ")}.${guidance} Reuse already observed facts instead of repeating successful reads. Rejected request diagnostics: ${details}` });
+        this.saveHistory();
+        return await this.execute();
+      }
+
       if (response.tool_calls && response.tool_calls.length > 0) {
         this._emptyRetried = 0;
         this.messages.push({ role: "assistant_with_tool", content: response, timestamp: Date.now() });
@@ -398,7 +426,7 @@ class Prompt {
               const protocolError = toolCall.name === "__tool_protocol_error__";
               const tool = protocolError ? null : this.tools[toolCall.name];
               if (!tool) {
-                this._unknownToolRetried = (this._unknownToolRetried || 0) + 1;
+                this._toolProtocolRetried = (this._toolProtocolRetried || 0) + 1;
                 const available = Object.keys(this.tools).filter(name => name !== "__tool_protocol_error__");
                 const details = protocolError
                   ? `The generated tool request could not be parsed: ${String(toolCall.args?.error || "invalid syntax").slice(0, 500)}. No action was run. Rejected syntax: ${String(toolCall.args?.raw || "").slice(0, 4000)}`
@@ -413,14 +441,16 @@ class Prompt {
                   name: toolCall.name,
                   timestamp: Date.now()
                 };
-                if (this._unknownToolRetried >= 3) {
-                  entry.content = `Aborting: the same call has been refused for invalid tool protocol ${this._unknownToolRetried} times. ${entry.content}`;
+                if (this._toolProtocolRetried >= 3) {
+                  entry.content = `Aborting: the same call has been refused for invalid tool protocol ${this._toolProtocolRetried} times. ${entry.content}`;
                   entry.loopAbort = true;
                   entry.loopAbortCall = { name: toolCall.name, args: toolCall.args };
                 }
                 console.error(`[tool] ${toolCall.name} => invalid tool request`);
                 return entry;
               }
+
+              this._toolProtocolRetried = 0;
 
               // Count consequential tool calls toward the policy budget and pass the
               // call id so the policy can record its decision against this entry.
@@ -431,7 +461,7 @@ class Prompt {
               }
 
               const toolResponse = await tool.invoke(invokeArgs);
-              this._unknownToolRetried = 0;
+              this._toolProtocolRetried = 0;
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
               const preview = typeof toolResponse === "string" ? toolResponse.slice(0, 100) : "";
               console.error(`[tool] ${toolCall.name} => done (${elapsed}s) ${preview}`);

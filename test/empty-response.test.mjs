@@ -39,14 +39,13 @@ test("three consecutive empty replies stop and retain diagnostic evidence", asyn
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empty-stop-"));
   try {
     const file = path.join(dir, "history.json");
-    const malformed = new AIMessage({ content: '', invalid_tool_calls: [{ name: 'lookup', args: '{', error: 'Invalid JSON', type: 'invalid_tool_call' }] });
-    const { prompt, calls } = fakePrompt([empty(), malformed, empty()], file);
+    const { prompt, calls } = fakePrompt([empty(), empty(), empty()], file);
     assert.match(await prompt.execute(), /empty response three times/);
     assert.equal(calls(), 3);
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(data.modelDiagnostics.length, 3);
     assert.equal(data.modelDiagnostics[0].finishReason, 'stop');
-    assert.equal(data.modelDiagnostics[1].invalidToolCalls[0].args, '{');
+    assert.deepEqual(data.modelDiagnostics[1].invalidToolCalls, []);
     assert.equal(data.messages.some(message => JSON.stringify(message).includes('invalidToolCalls')), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -80,4 +79,40 @@ test("unrepairable tool protocol stops after three rejected requests", async () 
   assert.match(await prompt.execute(), /Stopped:/);
   assert.equal(calls(), 3);
   assert.match(prompt.messages.findLast(message => message.role === 'tool').content, /Aborting:/);
+});
+
+
+test("a provider that loses a tool call gets namespace feedback and does not execute a guessed action", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-tool-repair-'));
+  try {
+    const file = path.join(dir, 'history.json');
+    const lost = new AIMessage({ content: '', response_metadata: { finish_reason: 'tool_calls' } });
+    const valid = new AIMessage({ content: '', tool_calls: [{ name: 'executeAux4', args: {command:'records list'}, id:'fixed', type:'tool_call' }] });
+    const { prompt, calls } = fakePrompt([lost, valid, new AIMessage('done')], file);
+    let invoked = 0;
+    prompt.tools.executeAux4 = { invoke: async args => { invoked++; assert.equal(args.command, 'records list'); return 'records'; } };
+    assert.equal(await prompt.execute(), 'done');
+    assert.equal(calls(), 3);
+    assert.equal(invoked, 1);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const feedback = data.messages.find(message => String(message.content).startsWith('The provider returned an unusable tool request'));
+    assert.match(feedback.content, /CLI command path is not a tool name/);
+    assert.equal(data.modelDiagnostics[0].kind, 'unusable-tool-request');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("invalid JSON tool arguments are diagnosed separately from blank answers", async () => {
+  const malformed = new AIMessage({ content: '', invalid_tool_calls: [{name:'lookup',args:'{',error:'Invalid JSON',type:'invalid_tool_call'}] });
+  const { prompt } = fakePrompt([malformed, lookup('fixed'), new AIMessage('done')]);
+  assert.equal(await prompt.execute(), 'done');
+  assert.equal(prompt.modelDiagnostics[0].kind, 'unusable-tool-request');
+  assert.equal(prompt.modelDiagnostics[0].invalidToolCalls[0].args, '{');
+  assert.match(prompt.messages[1].content, /Invalid JSON/);
+});
+
+test("three unusable provider requests stop with bounded feedback", async () => {
+  const lost = () => new AIMessage({ content: '', response_metadata: {finish_reason:'tool_calls'} });
+  const { prompt, calls } = fakePrompt([lost(),lost(),lost()]);
+  assert.match(await prompt.execute(), /unusable tool request three times/);
+  assert.equal(calls(), 3);
 });
