@@ -111,5 +111,6 @@ export function reusableReadResult(command, result) {
   if (data?.answered !== false || typeof data.question !== "string" || typeof data.url !== "string") return true;
   let args;
   try { args = parseCommandArgs(String(command || "")); } catch { return false; }
-  return args.includes(data.question) && args.includes(data.url);
+  const values = args.map(arg => /^--[^=]+=/.test(arg) ? arg.slice(arg.indexOf("=") + 1) : arg);
+  return values.includes(data.question) && values.includes(data.url);
 }

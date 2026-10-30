@@ -234,3 +234,29 @@ test("negative lookup metadata cannot extend a loop, while new questions, source
   assert.match(String(await guarded.invoke({command:base})), /answered/);
   assert.equal(calls, 6);
 });
+
+
+test("recovery carries negative read evidence within one request and refreshes it for a later request", async () => {
+  const command = 'records find --url https://example.test/records --question "Which reference applies?"';
+  const result = JSON.stringify({answered:false,question:"Which reference applies?",url:"https://example.test/records"});
+  const messages = [
+    {role:"assistant_with_tool",content:{kwargs:{tool_calls:[{id:"a",name:"executeAux4",args:{command}}]}}},
+    {role:"tool",tool_call_id:"a",timestamp:101,content:result},
+    {role:"assistant_with_tool",content:{tool_calls:[{id:"b",name:"executeAux4",args:{command:command+" --provider alternate"}}]}},
+    {role:"tool",tool_call_id:"b",timestamp:102,content:result}
+  ];
+  let calls = 0;
+  const underlying = {description:"execute",schema:z.object({command:z.string()}),invoke:async () => { calls++; return result; }};
+  const recovery = wrapWithLoopDetection("executeAux4", underlying, {getMessages:() => messages,historySince:100});
+  assert.match(String(await recovery.invoke({command:command+" --granularity sentence"})), /identical evidence twice/);
+  assert.equal(calls, 0);
+  await recovery.invoke({command:command.replace("Which reference applies?","Another question")});
+  assert.equal(calls, 1);
+  const nextRequest = wrapWithLoopDetection("executeAux4", underlying, {getMessages:() => messages,historySince:200});
+  await nextRequest.invoke({command});
+  assert.equal(calls, 2);
+  const legacy = messages.map(({timestamp, ...message}) => message);
+  const unversioned = wrapWithLoopDetection("executeAux4", underlying, {getMessages:() => legacy,historySince:200});
+  await unversioned.invoke({command});
+  assert.equal(calls, 3);
+});

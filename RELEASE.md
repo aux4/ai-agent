@@ -5,6 +5,11 @@
 
 
 
+## 1.3.24
+
+- Carry read evidence into supervised recovery rounds within the current authoritative request revision, preventing a fresh tool process from repeating known negative lookups.
+- Allow a later request to refresh history and preserve resets after successful changes.
+
 ## 1.3.23
 
 - Count repeated structured negative answers by question and source rather than session, ranking metadata, or timings.

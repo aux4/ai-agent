@@ -1743,18 +1743,47 @@ export function resultShape(result) {
     .slice(0, 400);
 }
 
-export function wrapWithLoopDetection(name, underlyingTool) {
+export function wrapWithLoopDetection(name, underlyingTool, {getMessages, historySince = Infinity} = {}) {
   const seen = new Map();
   const shapes = new Map();
   const readResults = new Map();
   const refusedReads = new Map();
   const successfulChanges = [];
   const pendingChanges = [];
+  let seeded = false;
+  const seedReads = () => {
+    if (seeded) return;
+    seeded = true;
+    if (!getMessages || !Number.isFinite(historySince)) return;
+    const calls = new Map();
+    for (const message of getMessages() || []) {
+      const content = message.content;
+      const toolCalls = content?.tool_calls || content?.kwargs?.tool_calls || [];
+      for (const call of toolCalls) calls.set(call.id, call);
+      const timestamp = Number(message.timestamp);
+      if (message.role !== "tool" || !Number.isFinite(timestamp) || timestamp < historySince) continue;
+      const call = calls.get(message.tool_call_id);
+      if (!call || call.name !== name) continue;
+      const result = String(message.content);
+      if (commandResultFailed(result)) continue;
+      if (changeResultCompleted(result) && commandMayChangeState(name, call.args || {})) {
+        readResults.clear();
+        continue;
+      }
+      const family = readCommandFamily(name, call.args || {});
+      if (!family) continue;
+      const results = readResults.get(family) || new Map();
+      const key = readResultKey(result);
+      results.set(key, (results.get(key) || 0) + 1);
+      readResults.set(family, results);
+    }
+  };
 
   return tool(
     async (args) => {
       const cleanArgs = { ...args };
       delete cleanArgs.__policyCallId;
+      seedReads();
       const target = mutationTarget(name, cleanArgs);
       if (target && pendingChanges.some(prior => sameMutationTarget(prior, target))) {
         return "Not run: a change of this kind for this target is already running. Wait for its result, then read the current state before deciding whether anything else is needed.";
@@ -1963,10 +1992,18 @@ export function createTools(config = {}) {
     }
   }
 
+  // A supervisor's authority file is rewritten for a new request. Its revision
+  // fences replayed read history to this request, so recovery keeps evidence
+  // while a later independent task can refresh externally changed state.
+  let historySince = Infinity;
+  if (process.env.AUX4_AGENT_REQUEST_FILE) {
+    try { historySince = fs.statSync(process.env.AUX4_AGENT_REQUEST_FILE).mtimeMs; } catch { /* no usable request context */ }
+  }
+
   // Loop detection wraps every bound tool: a stuck agent repeats any of them, not just the
   // consequential ones.
   for (const name of Object.keys(base)) {
-    base[name] = wrapWithLoopDetection(name, base[name]);
+    base[name] = wrapWithLoopDetection(name, base[name], {getMessages, historySince});
   }
 
   // Hooks are the outermost wrap: a caller gets to check (and block) a call before

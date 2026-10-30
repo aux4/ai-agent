@@ -76,6 +76,7 @@ test("negative lookup keys ignore ranking metadata but preserve the question and
   const reranked = JSON.stringify({answered:false,question:"Which reference applies?",url:"https://example.test/records",session:"s2",answerScore:0.04,matches:[{text:"Reference list",score:0.05}],wallMs:999});
   assert.equal(readResultKey(first), readResultKey(reranked));
   assert.equal(reusableReadResult('records find --url https://example.test/records --question "Which reference applies?" --provider alternate', readResultKey(first)), true);
+  assert.equal(reusableReadResult('records find --url=https://example.test/records --question="Which reference applies?"', readResultKey(first)), true);
   assert.equal(reusableReadResult('records find --url https://example.test/elsewhere --question "Which reference applies?"', readResultKey(first)), false);
   assert.equal(reusableReadResult('records find --url https://example.test/records --question "Who owns the record?"', readResultKey(first)), false);
   assert.notEqual(readResultKey('{"answered":true,"answer":"one"}'), readResultKey('{"answered":true,"answer":"two"}'));
