@@ -5,6 +5,13 @@
 
 
 
+## 1.3.22
+
+- Match permission wildcards across quoted multiline argument values for both allow and deny rules.
+
+- Omit filesystem tools when static permissions grant no access to their read, write, or delete scope, reducing impossible tool choices and repeated permission failures.
+- Preserve tools for partial path grants and interactive approval; runtime checks still enforce the concrete path.
+
 ## 1.3.21
 
 - Reserve mutation targets only after completed effects, keeping waiting-input and explicitly unsubmitted workflows resumable; read missing field handoffs as well as confirmation contracts.

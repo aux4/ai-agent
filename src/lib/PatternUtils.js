@@ -5,7 +5,7 @@
 // Convert a glob pattern (with * wildcards) to a RegExp and test it against a string.
 export function matchesPattern(subject, pattern) {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp("^" + escaped.replace(/\*/g, ".*") + "$");
+  const regex = new RegExp("^" + escaped.replace(/\*/g, ".*") + "$", "s");
   return regex.test(subject);
 }
 

@@ -93,3 +93,17 @@ test("executeAux4's description is its full doc, verbatim", () => {
   const doc = fs.readFileSync(new URL("../src/docs/tools/executeAux4.md", import.meta.url), "utf8");
   assert.equal(Descriptions.executeAux4Desc, doc);
 });
+
+
+test("filesystem tools reflect static permission scopes without hiding partial or interactive grants", () => {
+  const commandsOnly = createTools({permissions:{allow:["aux4:records *"]}});
+  for (const name of ["readFile","listFiles","searchFiles","writeFile","editFile","saveImage","createDirectory","removeFiles"]) assert.equal(commandsOnly[name], undefined, name);
+  assert.ok(commandsOnly.executeAux4);
+  const partial = createTools({permissions:{allow:["file:read:/tmp/reports/*", "file:write:/tmp/out/*"],deny:["file:read:/tmp/reports/private/*"]}});
+  assert.ok(partial.readFile); assert.ok(partial.searchFiles); assert.ok(partial.writeFile);
+  assert.equal(partial.removeFiles, undefined);
+  const explicitDeny = createTools({permissions:{allow:["file:read:*"],deny:["file:read:*"]}});
+  assert.equal(explicitDeny.readFile, undefined);
+  const interactive = createTools({permissions:{ask:["file:read:/work/*"]}});
+  assert.ok(interactive.readFile);
+});

@@ -1904,6 +1904,28 @@ export function createTools(config = {}) {
     currentDateTime: currentDateTimeTool
   };
 
+  // Do not advertise a filesystem capability that this run can never use.
+  // Command globs do not grant file access: permission scopes are separate.
+  // Keep tools for partial path grants and interactive grants, since the
+  // concrete target still needs the normal runtime permission check.
+  if (permissions) {
+    const availableScope = scope => {
+      const deniedEverywhere = (permissions.deny || []).some(raw => {
+        const parsed = parsePattern(raw);
+        return parsed.type === "file" && parsed.scope === scope && /^\*+$/.test(parsed.pattern);
+      });
+      if (deniedEverywhere) return false;
+      return [...(permissions.allow || ["*"]), ...(permissions.ask || [])].some(raw => {
+        const parsed = parsePattern(raw);
+        return parsed.type === "file" && parsed.scope === scope;
+      });
+    };
+    const fileScopes = {readFile:"read", listFiles:"read", searchFiles:"read", writeFile:"write", editFile:"write", saveImage:"write", createDirectory:"write", removeFiles:"delete"};
+    for (const [name, scope] of Object.entries(fileScopes)) {
+      if (!availableScope(scope)) delete base[name];
+    }
+  }
+
   // Only bind the tools whose backing resource actually exists -- an unbound tool costs
   // nothing in the prompt, and binding one that always says "not configured"/"not found" just
   // burns tokens describing a no-op. Each check mirrors the real resource the tool reads from
@@ -1922,7 +1944,7 @@ export function createTools(config = {}) {
     // Gate only the consequential tools; read-only tools stay exempt.
     const CONSEQUENTIAL = ["executeAux4", "writeFile", "editFile", "removeFiles", "createDirectory", "saveImage"];
     for (const name of CONSEQUENTIAL) {
-      base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
+      if (base[name]) base[name] = wrapWithPolicy(name, base[name], policy, getUsage);
     }
   }
 
