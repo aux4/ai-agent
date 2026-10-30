@@ -5,6 +5,11 @@
 
 
 
+## 1.3.25
+
+- Reuse explicit unsearchable-source results across question/provider variations instead of retrying a source with no readable content.
+- Preserve new-source discovery and post-change refreshes; keep raw results in history.
+
 ## 1.3.24
 
 - Carry read evidence into supervised recovery rounds within the current authoritative request revision, preventing a fresh tool process from repeating known negative lookups.

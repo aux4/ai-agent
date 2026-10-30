@@ -1,5 +1,5 @@
 import fs from "fs";
-import { repeatFixHint, correctedCommand, isEmptyLookupResult, readResultKey, reusableReadResult } from "./LoopHint.js";
+import { repeatFixHint, correctedCommand, readResultKey, reusableReadResult, readRepeatLimit } from "./LoopHint.js";
 import { parameterErrorHelp, parameterHelpArgs } from "./ParameterHelp.js";
 import path from "path";
 import os from "os";
@@ -1844,12 +1844,12 @@ export function wrapWithLoopDetection(name, underlyingTool, {getMessages, histor
       const readFamily = readCommandFamily(name, cleanArgs);
       const familyResults = readFamily && readResults.get(readFamily);
       const repeatedEvidence = familyResults && [...familyResults.entries()].find(([result, count]) =>
-        count >= (isEmptyLookupResult(args?.command, result) ? 4 : 2) && reusableReadResult(args?.command, result));
+        count >= readRepeatLimit(args?.command, result) && reusableReadResult(args?.command, result));
       if (repeatedEvidence) {
         const refused = (refusedReads.get(readFamily) || 0) + 1;
         refusedReads.set(readFamily, refused);
         const evidence = repeatedEvidence[0].slice(0, 1200);
-        const repetition = repeatedEvidence[1] === 2 ? "twice" : `${repeatedEvidence[1]} times`;
+        const repetition = repeatedEvidence[1] === 1 ? "once" : repeatedEvidence[1] === 2 ? "twice" : `${repeatedEvidence[1]} times`;
         if (refused >= LOOP_ABORT_AFTER) {
           const error = new Error(`Aborting: the same action has returned the same result ${repetition} and ${refused} further reads were refused. The agent is not making progress. Existing evidence:\n${evidence}`);
           error.loopAbort = true;

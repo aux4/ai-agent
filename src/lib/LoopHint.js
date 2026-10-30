@@ -88,6 +88,7 @@ export function unansweredLookupRecovery(command, result) {
   let data;
   try { data=typeof result === "string" ? JSON.parse(result) : result; } catch { return null; }
   if (!data || data.answered !== false) return null;
+  if (data.sourceState === "unsearchable") return {family:lookup.family+":"+data.url,message:"This source has no searchable content. A new question, session, or ranking provider cannot repair that. Use actual observed navigation, another source, or discover the installed capability that provides the needed data. Do not invent a route."};
   return {family:lookup.family,message:"The lookup explicitly did not answer the question. Matching headings or labels do not establish the missing value. Inspect a relevant source or use one materially different available source, preserving the request's constraints. Do not keep rephrasing the same question against the same content. If the required fact is still unavailable, stop with BLOCKED and name it; do not invent it."};
 }
 
@@ -98,6 +99,7 @@ export function readResultKey(result) {
   const text = String(result);
   let data;
   try { data = JSON.parse(text); } catch { return text; }
+  if (data?.sourceState === "unsearchable" && typeof data.url === "string") return JSON.stringify({answered:false,sourceState:data.sourceState,url:data.url});
   if (data?.answered === false && typeof data.question === "string" && typeof data.url === "string") {
     return JSON.stringify({answered:false, question:data.question, url:data.url});
   }
@@ -108,9 +110,15 @@ export function readResultKey(result) {
 export function reusableReadResult(command, result) {
   let data;
   try { data = JSON.parse(String(result)); } catch { return true; }
-  if (data?.answered !== false || typeof data.question !== "string" || typeof data.url !== "string") return true;
+  if (typeof data?.url !== "string" || (data.sourceState !== "unsearchable" && (data.answered !== false || typeof data.question !== "string"))) return true;
   let args;
   try { args = parseCommandArgs(String(command || "")); } catch { return false; }
   const values = args.map(arg => /^--[^=]+=/.test(arg) ? arg.slice(arg.indexOf("=") + 1) : arg);
-  return values.includes(data.question) && values.includes(data.url);
+  return values.includes(data.url) && (data.sourceState === "unsearchable" || values.includes(data.question));
+}
+
+
+export function readRepeatLimit(command, result) {
+  try { if (JSON.parse(String(result))?.sourceState === "unsearchable") return 1; } catch { /* ordinary text evidence */ }
+  return isEmptyLookupResult(command, result) ? 4 : 2;
 }

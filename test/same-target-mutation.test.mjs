@@ -260,3 +260,14 @@ test("recovery carries negative read evidence within one request and refreshes i
   await unversioned.invoke({command});
   assert.equal(calls, 3);
 });
+
+
+test("an unsearchable source cannot be repaired by another question, but a new source stays available", async () => {
+  let calls=0;
+  const guarded=wrapWithLoopDetection("executeAux4",{description:"execute",schema:z.object({command:z.string()}),invoke:async ({command})=>{calls++;return JSON.stringify({answered:false,sourceState:"unsearchable",url:command.includes("elsewhere")?"https://example.test/elsewhere":"https://example.test/source",question:"Which reference applies?"});}});
+  await guarded.invoke({command:'records find --url https://example.test/source --question "Which reference applies?"'});
+  assert.match(String(await guarded.invoke({command:'records find --url https://example.test/source --question "List all entries" --provider alternate'})),/identical evidence once/);
+  assert.equal(calls,1);
+  await guarded.invoke({command:'records find --url https://example.test/elsewhere --question "Which reference applies?"'});
+  assert.equal(calls,2);
+});
