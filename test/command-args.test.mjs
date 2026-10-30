@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCommandArgs, buildAux4Argv, CommandParseError } from "../src/lib/CommandArgs.js";
+import { parseCommandArgs, buildAux4Argv, buildAux4Command, CommandParseError } from "../src/lib/CommandArgs.js";
 
 // `command` here never includes a leading "aux4" — executeAux4 already strips/omits it;
 // `aux4` is the spawn() binary, not an argv entry.
@@ -70,4 +70,14 @@ test("buildAux4Argv drops a duplicated aux4 binary name", () => {
   assert.deepEqual(buildAux4Argv("aux4 version"), ["aux4", "version"]);
   assert.deepEqual(buildAux4Argv("aux4 pkger list"), ["aux4", "pkger", "list"]);
   assert.deepEqual(buildAux4Argv("'aux4' aux4 version"), ["aux4", "aux4", "version"]);
+});
+
+test("buildAux4Command marks only an unquoted leading executable prefix as fallback-eligible", () => {
+  assert.equal(buildAux4Command("aux4 agent browser run --goal 'keep this'").withoutExecutablePrefix,
+    "agent browser run --goal 'keep this'");
+  assert.equal(buildAux4Command("aux4 aux4 agent browser run").withoutExecutablePrefix,
+    "agent browser run");
+  assert.equal(buildAux4Command("'aux4' agent browser run").withoutExecutablePrefix, null);
+  assert.equal(buildAux4Command("a\\ux4 agent browser run").withoutExecutablePrefix, null);
+  assert.throws(() => buildAux4Command("aux4 agent run ; rm -rf /"), CommandParseError);
 });

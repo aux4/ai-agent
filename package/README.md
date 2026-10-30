@@ -612,7 +612,9 @@ Each hook entry:
   `agent:browser/run`. `*` matches any single segment (`*/run`, `agent:browser/*`, `*/*`). The
   path is resolved from the model's command string the way aux4 itself resolves it
   (`aux4 <action words> --whereIsIt`) — never guessed from the string, so it is correct for any
-  installed package.
+  installed package. If a command starts with `aux4`, that exact package route is checked first;
+  only an unquoted prefix that does not resolve as a route is treated as the executable name.
+  Hooks, permissions, policy, and execution use the same resolved command.
 - **`params`** — a match filter on the call's own params: for `executeAux4`, parsed from the
   command string the way aux4 would parse `--name value` / `--name=value` pairs; for every other
   tool, the tool's own arguments object. `"a|b"` matches either value; a missing param never

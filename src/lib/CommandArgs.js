@@ -32,23 +32,25 @@ const WHITESPACE = new Set([" ", "\t", "\n", "\r"]);
 const DQ_ESCAPABLE = new Set(["\"", "\\"]);
 const CHAIN_OPERATORS = new Set([";", "|", "||", "&&", ">", "<"]);
 
-// Tokenize into { value, quoted } pairs. `quoted` is true if the token was produced (at
-// least in part) inside quotes or via a backslash escape — used to tell a literal `;`
-// the model typed inside quotes from a bare, unquoted chaining operator.
+// Tokenize into { value, quoted, start, end } records. `quoted` is true if the token
+// was produced (at least in part) inside quotes or via a backslash escape; source spans
+// let route normalization remove only a proven redundant executable token.
 function tokenize(command) {
   const input = String(command ?? "");
   const tokens = [];
   let current = "";
   let inWord = false;
   let sawQuoteOrEscape = false;
+  let tokenStart = -1;
   let i = 0;
 
   function pushToken() {
     if (inWord) {
-      tokens.push({ value: current, quoted: sawQuoteOrEscape });
+      tokens.push({ value: current, quoted: sawQuoteOrEscape, start: tokenStart, end: i });
       current = "";
       inWord = false;
       sawQuoteOrEscape = false;
+      tokenStart = -1;
     }
   }
 
@@ -64,6 +66,7 @@ function tokenize(command) {
     if (ch === "'") {
       const end = input.indexOf("'", i + 1);
       if (end === -1) throw new CommandParseError("unterminated single quote");
+      if (!inWord) tokenStart = i;
       current += input.slice(i + 1, end);
       inWord = true;
       sawQuoteOrEscape = true;
@@ -72,6 +75,7 @@ function tokenize(command) {
     }
 
     if (ch === "\"") {
+      if (!inWord) tokenStart = i;
       i++;
       let closed = false;
       while (i < input.length) {
@@ -97,6 +101,7 @@ function tokenize(command) {
 
     if (ch === "\\") {
       if (i + 1 >= input.length) throw new CommandParseError("trailing backslash");
+      if (!inWord) tokenStart = i;
       current += input[i + 1];
       inWord = true;
       sawQuoteOrEscape = true;
@@ -104,6 +109,7 @@ function tokenize(command) {
       continue;
     }
 
+    if (!inWord) tokenStart = i;
     current += ch;
     inWord = true;
     i++;
@@ -127,11 +133,12 @@ function findChainOperator(tokens) {
   return null;
 }
 
-// Build the argv passed to `spawn("aux4", argv)`. `command` is the string the model
-// supplied to executeAux4 WITHOUT a leading `aux4` (that binary name is the spawn target,
-// not an argument).
-export function buildAux4Argv(command) {
+// Build argv passed to `spawn("aux4", argv)`. Also retain whether a leading unquoted
+// `aux4` can be a redundant executable prefix; route resolution decides whether to use it.
+export function buildAux4Command(command) {
+  const input = String(command ?? "");
   const tokens = tokenize(command);
+  const rawTokens = tokens.slice();
   const op = findChainOperator(tokens);
   if (op) {
     throw new CommandParseError(
@@ -141,8 +148,30 @@ export function buildAux4Argv(command) {
   // A model that writes the full command line ("aux4 aux4 version", copied from a
   // task or a doc) means the `aux4` binary itself: `aux4 aux4 aux4 ...` is never a
   // real command, so drop the duplicated binary name.
+  let droppedBinaryPrefix = false;
   if (tokens.length >= 2 && !tokens[0].quoted && tokens[0].value === "aux4" && !tokens[1].quoted && tokens[1].value === "aux4") {
     tokens.shift();
+    droppedBinaryPrefix = true;
   }
-  return tokens.map((t) => t.value);
+
+  const hasExecutablePrefix = tokens.length > 0 && !tokens[0].quoted && tokens[0].value === "aux4";
+  let withoutExecutablePrefix = null;
+  if (hasExecutablePrefix) {
+    // A duplicated binary name was already consumed above; a fallback after that
+    // must also remove the next raw token, which still represents the redundant
+    // executable prefix in the original command string.
+    const tokensToRemove = droppedBinaryPrefix ? 2 : 1;
+    const lastRemoved = rawTokens[tokensToRemove - 1];
+    if (lastRemoved) withoutExecutablePrefix = input.slice(lastRemoved.end).trimStart();
+  }
+
+  return {
+    argv: tokens.map((t) => t.value),
+    hasExecutablePrefix,
+    withoutExecutablePrefix
+  };
+}
+
+export function buildAux4Argv(command) {
+  return buildAux4Command(command).argv;
 }

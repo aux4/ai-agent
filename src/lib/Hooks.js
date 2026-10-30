@@ -44,7 +44,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { tool } from "@langchain/core/tools";
-import { buildAux4Argv } from "./CommandArgs.js";
+import { buildAux4Command } from "./CommandArgs.js";
 
 const BLOCKED_HOOK_EXECUTORS = ["profile:", "stdin:"];
 const DEFAULT_HOOK_TIMEOUT_MS = 10000;
@@ -118,13 +118,14 @@ export function matchParams(hookParams, callParams) {
 // times in one run.
 const commandPathCache = new Map();
 
-export function resolveCommandPath(actionWords) {
-  const key = actionWords.join(" ");
+export function resolveCommandPath(actionWords, { cwd } = {}) {
+  const executionCwd = path.resolve(cwd || process.cwd());
+  const key = JSON.stringify([executionCwd, ...actionWords]);
   if (commandPathCache.has(key)) return commandPathCache.get(key);
 
   let result = null;
   try {
-    const proc = spawnSync("aux4", [...actionWords, "--whereIsIt"], { encoding: "utf-8", timeout: 5000 });
+    const proc = spawnSync("aux4", [...actionWords, "--whereIsIt"], { encoding: "utf-8", timeout: 5000, cwd: executionCwd });
     if (proc.status === 0 && proc.stdout) {
       const line = proc.stdout.split("\n").find((l) => l.includes(ARROW));
       if (line) {
@@ -140,12 +141,40 @@ export function resolveCommandPath(actionWords) {
   return result;
 }
 
+// Prefer a real `aux4/<profile>` route. Only fall back to treating a leading
+// unquoted `aux4` as the executable name when the exact route does not exist.
+export function normalizeExecuteAux4Command(command, { resolveUnprefixed = false, cwd } = {}) {
+  let parsed;
+  try {
+    parsed = parseExecuteAux4Call(command);
+  } catch (error) {
+    return { command, commandPath: null, parseError: error };
+  }
+  if (!parsed.withoutExecutablePrefix && !resolveUnprefixed) {
+    return { ...parsed, command, commandPath: null };
+  }
+  const exactPath = resolveCommandPath(parsed.actionWords, { cwd });
+  if (exactPath || !parsed.withoutExecutablePrefix) {
+    return { ...parsed, command, commandPath: exactPath };
+  }
+
+  const fallback = parseExecuteAux4Call(parsed.withoutExecutablePrefix);
+  const fallbackPath = resolveCommandPath(fallback.actionWords, { cwd });
+  if (!fallbackPath) return { ...parsed, command, commandPath: null };
+  return {
+    ...fallback,
+    command: parsed.withoutExecutablePrefix,
+    commandPath: fallbackPath,
+    normalizedFromExecutablePrefix: true
+  };
+}
+
 // Parse the flags portion of an executeAux4 command string into action words + a params
 // object, the way aux4 itself would parse --name value / --name=value pairs. NOT full
 // aux4 resolution (see module header) -- only what hook `params` matching and ${var}
 // interpolation need.
 export function parseExecuteAux4Call(command) {
-  const argv = buildAux4Argv(command);
+  const { argv, withoutExecutablePrefix } = buildAux4Command(command);
 
   let splitAt = argv.length;
   for (let i = 0; i < argv.length; i++) {
@@ -191,7 +220,7 @@ export function parseExecuteAux4Call(command) {
     }
   }
 
-  return { actionWords, params };
+  return { actionWords, params, withoutExecutablePrefix };
 }
 
 export function matchHooks(hooks, toolName, commandPath, callParams) {
@@ -337,12 +366,16 @@ export function wrapWithHooks(name, underlyingTool, hooksContext) {
     async (args) => {
       let commandPath = null;
       let callParams = args;
+      let forwardedArgs = args;
 
       if (name === "executeAux4" && args && typeof args.command === "string") {
         try {
-          const parsed = parseExecuteAux4Call(args.command);
+          const parsed = normalizeExecuteAux4Command(args.command, { resolveUnprefixed: true, cwd: args.cwd });
           callParams = parsed.params;
-          commandPath = resolveCommandPath(parsed.actionWords);
+          commandPath = parsed.commandPath;
+          if (parsed.normalizedFromExecutablePrefix) {
+            forwardedArgs = { ...args, command: parsed.command };
+          }
         } catch {
           // Unparseable command -- no hook can match it; fall through to the real tool,
           // which surfaces its own parse error to the model.
@@ -353,13 +386,13 @@ export function wrapWithHooks(name, underlyingTool, hooksContext) {
       const matched = isInsideHook() ? [] : matchHooks(hooks, name, commandPath, callParams);
 
       if (matched.length === 0) {
-        return underlyingTool.invoke(args);
+        return underlyingTool.invoke(forwardedArgs);
       }
 
       const vars = buildHookContext({
         toolName: name,
         commandPath,
-        commandLine: name === "executeAux4" && args && typeof args.command === "string" ? args.command : "",
+        commandLine: name === "executeAux4" && typeof forwardedArgs.command === "string" ? forwardedArgs.command : "",
         callParams,
         request: hooksContext.request,
         historyFile: liveHistoryFile(hooksContext),
@@ -412,7 +445,7 @@ export function wrapWithHooks(name, underlyingTool, hooksContext) {
           }
         } else {
           try {
-            toolResult = await underlyingTool.invoke(args);
+            toolResult = await underlyingTool.invoke(forwardedArgs);
           } catch (e) {
             failed = true;
             toolResult = e.message;

@@ -12,7 +12,7 @@ import { getEmbeddings, DEFAULT_EMBEDDINGS_TYPE } from "./Embeddings.js";
 import { ensureCompatibleEmbeddings } from "./EmbeddingsGuard.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
 import { buildAux4Argv, CommandParseError, parseCommandArgs } from "./CommandArgs.js";
-import { loadHooks, wrapWithHooks } from "./Hooks.js";
+import { loadHooks, normalizeExecuteAux4Command, wrapWithHooks } from "./Hooks.js";
 import { hasConfiguredStorage, hasReferences, hasSkills } from "./ToolBindings.js";
 
 // Short, model-facing tool descriptions -- what actually gets sent to the LLM on every call.
@@ -570,20 +570,10 @@ function formatTimeoutMessage(command, timeout, error) {
   return lines.join("\n");
 }
 
-// `aux4 <command>` with a leading `aux4` the model added itself ("aux4 google gmail
-// list") runs as `aux4 aux4 google ...` and fails with "Command not found". Nothing ran,
-// so retry once without that word -- the command the model meant.
+// The command resolver has already selected the exact route and canonical argv.
+// Never retry a failed execution with a different target after authorization.
 async function executeAux4Argv(command, { argv, stdin, timeout, cwd }) {
-  try {
-    return await executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
-  } catch (error) {
-    const notFound = !error.timedOut && /^Command not found/.test(String(error.message || "").trim());
-    if (notFound && argv.length > 1 && argv[0] === "aux4") {
-      const rest = argv.slice(1);
-      return await executeWithTimeout(`aux4 ${rest.join(" ")}`, { argv: rest, stdin, timeout, cwd });
-    }
-    throw error;
-  }
+  return executeWithTimeout(`aux4 ${command}`, { argv, stdin, timeout, cwd });
 }
 
 // A "Did you mean" from aux4 is turned into the exact call to make, with the agent's
@@ -604,6 +594,7 @@ function commandFailureMessage(error, command, argv, cwd, permissions) {
 
 export const executeAux4CliTool = tool(
   async ({ command, stdin, timeout, cwd }) => {
+    command = normalizeExecuteAux4Command(command, { cwd }).command;
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
       if (matchesPattern(command, pattern)) {
@@ -697,6 +688,7 @@ const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
 // Factory that wraps executeAux4 with permission checking
 export const createExecuteAux4Tool = (permissions) => tool(
   async ({ command, stdin, timeout, cwd }) => {
+    command = normalizeExecuteAux4Command(command, { cwd }).command;
     // Check system-level deny first (cannot be overridden)
     for (const pattern of SYSTEM_DENY) {
       if (matchesPattern(command, pattern)) {
@@ -2042,6 +2034,9 @@ function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
       const callId = args && args.__policyCallId;
       const cleanArgs = { ...args };
       delete cleanArgs.__policyCallId;
+      if (name === "executeAux4" && typeof cleanArgs.command === "string") {
+        cleanArgs.command = normalizeExecuteAux4Command(cleanArgs.command, { cwd: cleanArgs.cwd }).command;
+      }
 
       const usage = (getUsage && getUsage()) || {};
       const calls = usage.calls || 0;

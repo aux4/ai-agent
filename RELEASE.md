@@ -1,5 +1,9 @@
 # Release 1.3.2
 
+## 1.3.31
+
+- Resolve redundant `aux4` executable prefixes before hooks, permissions, policy, and dispatch; preserve a valid `aux4` package route when it resolves directly, and never retry a failed command against a different target.
+
 ## 1.3.30
 
 - Compare repeated read evidence within its parsed argument scope; differing queries, pages,
