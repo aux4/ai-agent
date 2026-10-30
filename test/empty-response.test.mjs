@@ -117,6 +117,71 @@ test("three unusable provider requests stop with bounded feedback", async () => 
   assert.equal(calls(), 3);
 });
 
+test("standalone malformed tool-shaped text gets bounded recovery, then a real bound call runs once", async () => {
+  const malformed = new AIMessage({ content: [{ type: 'text', text: 'executeAux4{command:<|"|>records list<|"|>}<tool_call|>' }] });
+  const valid = lookup('fixed');
+  const { prompt, calls } = fakePrompt([malformed, valid, new AIMessage('done')]);
+  let invoked = 0;
+  prompt.tools.executeAux4 = { invoke: async () => { invoked++; return 'must not run'; } };
+  prompt.tools.lookup = { invoke: async () => { invoked++; return '{"id":"r7"}'; } };
+
+  assert.equal(await prompt.execute(), 'done');
+  assert.equal(calls(), 3);
+  assert.equal(invoked, 1);
+  assert.equal(prompt.modelDiagnostics[0].kind, 'malformed-tool-shaped-text');
+  assert.match(prompt.messages.find(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.')).content, /No action was run/);
+  assert.equal(prompt.messages.filter(message => message.role === 'assistant_with_tool').length, 1);
+  assert.equal(prompt.messages.filter(message => message.role === 'tool').length, 1);
+});
+
+test("malformed tool-shaped responses stop after the shared three-attempt protocol budget", async () => {
+  const malformed = () => new AIMessage({ content: 'executeAux4{command:<|"|>records list<|"|>}' });
+  const { prompt, calls } = fakePrompt([malformed(), malformed(), malformed()]);
+  let invoked = 0;
+  prompt.tools.executeAux4 = { invoke: async () => { invoked++; return 'must not run'; } };
+
+  assert.match(await prompt.execute(), /unusable tool request three times/);
+  assert.equal(calls(), 3);
+  assert.equal(invoked, 0);
+  assert.equal(prompt.modelDiagnostics.filter(item => item.kind === 'malformed-tool-shaped-text').length, 3);
+  assert.equal(prompt.messages.filter(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.')).length, 2);
+});
+
+test("quoted examples and prose mentioning a tool-shaped string remain ordinary answers", async () => {
+  const examples = [
+    new AIMessage({ content: 'The example is `executeAux4{command:<|"|>records list<|"|>}`.' }),
+    new AIMessage({ content: '"executeAux4{command:<|"|>records list<|"|>}"' }),
+    new AIMessage({ content: 'Use executeAux4{command:<|"|>records list<|"|>} as an example.' })
+  ];
+  for (const response of examples) {
+    const { prompt, calls } = fakePrompt([response]);
+    const answer = await prompt.execute();
+    assert.equal(answer, response.content);
+    assert.equal(calls(), 1);
+    assert.equal(prompt.modelDiagnostics.length, 0);
+    assert.equal(prompt.messages.some(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.')), false);
+  }
+
+  const { prompt, calls } = fakePrompt([new AIMessage('The request quoted an example; I did not call it.')]);
+  prompt.messages[0].content += ' Example: executeAux4{command:<|"|>records list<|"|>}';
+  assert.equal(await prompt.execute(), 'The request quoted an example; I did not call it.');
+  assert.equal(calls(), 1);
+  assert.equal(prompt.modelDiagnostics.length, 0);
+});
+
+test("an earlier successful side effect is not replayed when the next response is malformed text", async () => {
+  const create = new AIMessage({ content: '', tool_calls: [{ name: 'create', args: { target: 'r7' }, id: 'created', type: 'tool_call' }] });
+  const malformed = new AIMessage({ content: 'create{target:r7}' });
+  const { prompt, calls } = fakePrompt([create, malformed, new AIMessage('done')]);
+  let creates = 0;
+  prompt.tools.create = { invoke: async () => { creates++; return 'created r7'; } };
+
+  assert.equal(await prompt.execute(), 'done');
+  assert.equal(calls(), 3);
+  assert.equal(creates, 1);
+  assert.equal(prompt.messages.filter(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.')).length, 1);
+});
+
 
 test("empty-lookup advice preserves raw tool data and adds no model call or automatic search", async () => {
   const call = (id,command) => new AIMessage({content:'',tool_calls:[{name:'executeAux4',args:{command},id,type:'tool_call'}]});

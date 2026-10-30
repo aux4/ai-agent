@@ -550,6 +550,10 @@ Two safeguards run on every turn, independent of any tool policy configuration:
   the last tool result, say what state you are in, and take the next action.") and retries, up to
   two attempts. If it is still empty after that, the run ends with an explicit message saying the
   model returned nothing three times in a row, rather than silence.
+- **Malformed tool-shaped text.** If an otherwise text-only response is exactly shaped like a call
+  to one of the bound tools, the agent records a protocol error and asks for a real structured tool
+  call, within the same three-attempt protocol-recovery limit used for invalid provider calls. It
+  never parses or executes the text; quoted examples and ordinary prose are left alone.
 - **Loop detection.** Every bound tool is wrapped so a call with the exact same arguments (session
   and request identifiers are normalised out of the comparison) that returns the exact same result
   twice is **refused** the next time it is attempted — the refusal message quotes the repeated

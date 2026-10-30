@@ -15,6 +15,7 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
 import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
+import { malformedToolRequestText } from "./ToolProtocolText.js";
 
 const VARIABLE_REGEX = /\{([a-zA-Z0-9-_]+)\}/g;
 
@@ -344,12 +345,14 @@ class Prompt {
 
       const invalidCalls = response.invalid_tool_calls || [];
       const lostToolCall = !response.tool_calls?.length && response.response_metadata?.finish_reason === "tool_calls";
-      if (!response.tool_calls?.length && (invalidCalls.length || lostToolCall)) {
+      const malformedTextCall = malformedToolRequestText(response, this.tools || {});
+      if (!response.tool_calls?.length && (invalidCalls.length || lostToolCall || malformedTextCall)) {
         this._emptyRetried = 0;
         this._toolProtocolRetried = (this._toolProtocolRetried || 0) + 1;
-        this.modelDiagnostics.push({ kind: "unusable-tool-request", timestamp: Date.now(),
+        this.modelDiagnostics.push({ kind: malformedTextCall ? "malformed-tool-shaped-text" : "unusable-tool-request", timestamp: Date.now(),
           finishReason: response.response_metadata?.finish_reason || "",
           outputTokens: response.response_metadata?.tokenUsage?.completionTokens || response.usage_metadata?.output_tokens || 0,
+          ...(malformedTextCall ? { textPreview: malformedTextCall.slice(0, 1000) } : {}),
           invalidToolCalls: invalidCalls.map(call => ({ name: call.name, args: String(call.args || "").slice(0, 2000), error: String(call.error || "").slice(0, 500) })) });
         this.modelDiagnostics = this.modelDiagnostics.slice(-20);
         if (this._toolProtocolRetried >= 3) {
@@ -359,13 +362,16 @@ class Prompt {
           return answer;
         }
         const available = Object.keys(this.tools || {}).filter(name => name !== "__tool_protocol_error__");
-        const details = JSON.stringify(invalidCalls.map(call => ({ name: call.name, args: call.args, error: call.error })))
-          .slice(0, 2000).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+        const details = malformedTextCall
+          ? JSON.stringify({ malformedToolShapedText: malformedTextCall.slice(0, 1000) })
+          : JSON.stringify(invalidCalls.map(call => ({ name: call.name, args: call.args, error: call.error })))
+            .slice(0, 2000);
+        const safeDetails = details.replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
         const guidance = this.tools?.executeAux4
           ? ' A CLI command path is not a tool name: use executeAux4 with {"command":"the CLI command path and flags"}.'
           : " Use a bound tool's declared argument schema.";
         this.messages.push({ role: "user", timestamp: Date.now(), content:
-          `The provider returned an unusable tool request. No action was run. Repair the tool name and arguments using a bound tool. Available tools: ${available.join(", ")}.${guidance} Reuse already observed facts instead of repeating successful reads. Rejected request diagnostics: ${details}` });
+          `The provider returned an unusable tool request. No action was run. Repair the tool name and arguments using a bound tool. Available tools: ${available.join(", ")}.${guidance} Reuse already observed facts instead of repeating successful reads. Rejected request diagnostics: ${safeDetails}` });
         this.saveHistory();
         return await this.execute();
       }
