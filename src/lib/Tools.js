@@ -1756,10 +1756,10 @@ export function callShape(name, args) {
     .replace(/--session[= ]+'?[A-Za-z0-9-]+'?/g, "--session <id>");
 }
 
-// A command group can return the same help or read result while a model keeps
-// changing unrelated flags. Track identical evidence per command path so a
-// third variation can be stopped before it consumes another tool call. Keep
-// this away from actions (including browser runs), whose unchanged-looking
+// A command group can return identical evidence for different queries without
+// those queries being equivalent. Track result repeats per semantic scope, and
+// separately bound consecutive novel scopes that add no evidence. Keep this
+// away from actions (including browser runs), whose unchanged-looking
 // responses may follow real mutations.
 function readCommandFamily(name, args) {
   if (name !== "executeAux4" || typeof args?.command !== "string") return null;
@@ -1776,6 +1776,73 @@ function readCommandFamily(name, args) {
   const commandPath = (firstFlag < 0 ? argv : argv.slice(0, firstFlag)).join(" ").trim();
   if (!commandPath || MUTATION_VERB.test(commandPath) || commandPath.split(/\s+/).at(-1) === "run") return null;
   return commandPath;
+}
+
+const READ_NO_PROGRESS_SCOPE_LIMIT = 6;
+
+function readScopeKey(command, result) {
+  let argv;
+  try { argv = parseCommandArgs(String(command || "")); } catch { return null; }
+  if (argv[0] === "aux4") argv = argv.slice(1);
+
+  // Preserve the existing rule that changing only provider/session metadata
+  // cannot repair an explicit negative answer for the same source/question.
+  if (reusableReadResult(command, result)) {
+    try {
+      const data = JSON.parse(String(result));
+      if (data?.sourceState === "unsearchable" || (data?.answered === false && typeof data.url === "string" && typeof data.question === "string")) {
+        return JSON.stringify({ negativeEvidence: readResultKey(result) });
+      }
+    } catch { /* ordinary command result */ }
+  }
+
+  // parseCommandArgs normalizes shell quoting/whitespace. Retain the original
+  // argument order and every value; without a grammar guarantee, reordering
+  // flags or dropping output/pagination options could merge distinct scopes.
+  return JSON.stringify(argv);
+}
+
+function getReadFamilyState(readResults, family) {
+  let state = readResults.get(family);
+  if (!state) {
+    state = { scopes: new Map(), evidence: new Set(), noProgressScopes: 0 };
+    readResults.set(family, state);
+  }
+  return state;
+}
+
+function recordReadResult(readResults, family, command, result) {
+  const scope = readScopeKey(command, result);
+  if (scope === null) return false;
+  const state = getReadFamilyState(readResults, family);
+  const evidence = readResultKey(result);
+  const isNewEvidence = !state.evidence.has(evidence);
+  let scopeEvidence = state.scopes.get(scope);
+  const isNovelScope = !scopeEvidence;
+  if (!scopeEvidence) {
+    scopeEvidence = new Map();
+    state.scopes.set(scope, scopeEvidence);
+  }
+
+  if (isNovelScope && state.evidence.has(evidence)) state.noProgressScopes += 1;
+  else if (!state.evidence.has(evidence)) state.noProgressScopes = 0;
+  state.evidence.add(evidence);
+  scopeEvidence.set(evidence, (scopeEvidence.get(evidence) || 0) + 1);
+  return isNewEvidence;
+}
+
+function findPriorReadScope(state, command, scope) {
+  const exact = state?.scopes.get(scope);
+  if (exact) return exact;
+  for (const evidenceByScope of state?.scopes.values() || []) {
+    for (const [evidence] of evidenceByScope) {
+      let data;
+      try { data = JSON.parse(evidence); } catch { continue; }
+      if ((data?.sourceState === "unsearchable" || (data?.answered === false && typeof data.url === "string" && typeof data.question === "string"))
+        && reusableReadResult(command, evidence)) return evidenceByScope;
+    }
+  }
+  return null;
 }
 
 function commandMayChangeState(name, args) {
@@ -1824,10 +1891,7 @@ export function wrapWithLoopDetection(name, underlyingTool, {getMessages, histor
       }
       const family = readCommandFamily(name, call.args || {});
       if (!family) continue;
-      const results = readResults.get(family) || new Map();
-      const key = readResultKey(result);
-      results.set(key, (results.get(key) || 0) + 1);
-      readResults.set(family, results);
+      recordReadResult(readResults, family, call.args?.command, result);
     }
   };
 
@@ -1894,8 +1958,12 @@ export function wrapWithLoopDetection(name, underlyingTool, {getMessages, histor
       }
 
       const readFamily = readCommandFamily(name, cleanArgs);
-      const familyResults = readFamily && readResults.get(readFamily);
-      const repeatedEvidence = familyResults && [...familyResults.entries()].find(([result, count]) =>
+      const readScope = readFamily && readScopeKey(args?.command, "");
+      const familyState = readFamily && readResults.get(readFamily);
+      const scopeEvidence = readScope !== null && readScope !== undefined
+        ? findPriorReadScope(familyState, args?.command, readScope)
+        : null;
+      const repeatedEvidence = scopeEvidence && [...scopeEvidence.entries()].find(([result, count]) =>
         count >= readRepeatLimit(args?.command, result) && reusableReadResult(args?.command, result));
       if (repeatedEvidence) {
         const refused = (refusedReads.get(readFamily) || 0) + 1;
@@ -1903,11 +1971,24 @@ export function wrapWithLoopDetection(name, underlyingTool, {getMessages, histor
         const evidence = repeatedEvidence[0].slice(0, 1200);
         const repetition = repeatedEvidence[1] === 1 ? "once" : repeatedEvidence[1] === 2 ? "twice" : `${repeatedEvidence[1]} times`;
         if (refused >= LOOP_ABORT_AFTER) {
-          const error = new Error(`Aborting: the same action has returned the same result ${repetition} and ${refused} further reads were refused. The agent is not making progress. Existing evidence:\n${evidence}`);
+          const error = new Error(`Aborting: this read scope returned the same evidence ${repetition} and ${refused} further reads were refused. The agent is not making progress. Existing evidence:\n${evidence}`);
           error.loopAbort = true;
           throw error;
         }
-        return `Not run: ${readFamily} has already returned identical evidence ${repetition} after different arguments. Reuse the existing facts to finish the remaining work; choose a materially different source only if a required fact is absent. If this was group help, run one of the listed subcommands before adding flags.\nExisting evidence:\n${evidence}`;
+        return `Not run: this read scope has already returned identical evidence ${repetition}. Reuse the existing facts for this scope; if required evidence is still missing, use a genuinely different relevant query or source.\nExisting evidence:\n${evidence}`;
+      }
+      if (readFamily && readScope !== null && readScope !== undefined && !scopeEvidence
+        && familyState?.noProgressScopes >= READ_NO_PROGRESS_SCOPE_LIMIT) {
+        const refused = (refusedReads.get(readFamily) || 0) + 1;
+        refusedReads.set(readFamily, refused);
+        const evidence = [...familyState.evidence].at(-1)?.slice(0, 1200) || "(no reusable evidence captured)";
+        const errorText = `Read exploration budget exhausted for ${readFamily}: ${READ_NO_PROGRESS_SCOPE_LIMIT} distinct scopes returned no new evidence. The untried scope has not been checked; existing results do not prove it empty or equivalent. Stop with the requested outcome unresolved, or use a different relevant command family if one is available.\nKnown evidence (does not establish the untried scope):\n${evidence}`;
+        if (refused >= LOOP_ABORT_AFTER) {
+          const error = new Error(`Aborting: ${errorText}`);
+          error.loopAbort = true;
+          throw error;
+        }
+        return `Not run: ${errorText}`;
       }
 
       if (target) pendingChanges.push(target);
@@ -1923,12 +2004,8 @@ export function wrapWithLoopDetection(name, underlyingTool, {getMessages, histor
           readResults.clear();
           refusedReads.clear();
         }
-        if (readFamily && !commandResultFailed(asText)) {
-          const results = readResults.get(readFamily) || new Map();
-          const evidenceKey = readResultKey(asText);
-          results.set(evidenceKey, (results.get(evidenceKey) || 0) + 1);
-          readResults.set(readFamily, results);
-        }
+        if (readFamily && !commandResultFailed(asText)
+          && recordReadResult(readResults, readFamily, args?.command, asText)) refusedReads.delete(readFamily);
         seen.set(key, prior && prior.result === asText
           ? { count: prior.count + 1, result: asText }
           : { count: 1, result: asText });

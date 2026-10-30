@@ -1,5 +1,12 @@
 # Release 1.3.2
 
+## 1.3.30
+
+- Compare repeated read evidence within its parsed argument scope; differing queries, pages,
+  targets, and sources remain executable. Bound consecutive new scopes that add no evidence with
+  an explicit unresolved-result notice, and reset the allowance when new evidence or a completed
+  mutation arrives.
+
 ## 1.3.29
 
 - Compact complete oversized JSON command output losslessly when it fits the existing tool-output limit, keeping it parseable for downstream evidence checks.

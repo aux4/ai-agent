@@ -569,6 +569,12 @@ Two safeguards run on every turn, independent of any tool policy configuration:
   another refusal). A call whose arguments change, or whose result changes (e.g. legitimate
   polling), is never blocked, and the real underlying tool never runs again once a call starts
   being refused — only the refused/aborted notices keep being generated until the abort fires.
+  Read-only aux4 commands use the parsed command and arguments as a scope: repeated identical
+  evidence is refused for that scope, while a different query, page, target, or source is still
+  executed. Six consecutive new scopes that return no new evidence exhaust a bounded exploration
+  allowance; the refusal says the untried scope remains unknown. New evidence and successful
+  mutations reset that allowance. This avoids treating equal results from different filters as
+  proof that an unexecuted filter would also return nothing.
 
 ## Tool-Call Hooks
 

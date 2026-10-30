@@ -61,7 +61,7 @@ test("parallel changes to the same target reserve it before the first call compl
   assert.match(String(await first), /calendar#event/);
 });
 
-test("identical successful evidence across changed read flags stops before a third call", async () => {
+test("the same parsed read scope stops after repeated identical evidence", async () => {
   let calls = 0;
   const help = "list\nList records.\nget\nGet one record.";
   const guarded = wrapWithLoopDetection("executeAux4", {
@@ -70,13 +70,42 @@ test("identical successful evidence across changed read flags stops before a thi
     invoke: async () => { calls++; return help; }
   });
 
-  await guarded.invoke({ command: "google calendar events --maxResults 1" });
-  await guarded.invoke({ command: "google calendar events --singleEvents true" });
-  const third = String(await guarded.invoke({ command: "google calendar events --timeMin 2026-01-01T00:00:00Z" }));
+  await guarded.invoke({ command: 'google calendar events --query "open events"' });
+  await guarded.invoke({ command: "google calendar events --query 'open events'" });
+  const third = String(await guarded.invoke({ command: "google calendar events   --query   \"open events\"" }));
 
-  assert.match(third, /identical evidence twice after different arguments/);
-  assert.match(third, /run one of the listed subcommands/);
+  assert.match(third, /this read scope has already returned identical evidence twice/);
   assert.equal(calls, 2);
+});
+
+test("a distinct query executes after earlier scopes returned the same evidence", async () => {
+  let calls = 0;
+  const guarded = wrapWithLoopDetection("executeAux4", {
+    description: "execute aux4", schema: z.object({ command: z.string() }),
+    invoke: async ({command}) => {
+      calls++;
+      return command.includes("broader")
+        ? '{"records":[{"id":"r1"},{"id":"r2"}]}'
+        : '{"records":[{"id":"r1"}]}';
+    }
+  });
+  await guarded.invoke({command:"records list --query narrow-a"});
+  await guarded.invoke({command:"records list --query narrow-b"});
+  const broader = String(await guarded.invoke({command:"records list --query broader"}));
+  assert.deepEqual(JSON.parse(broader), {records:[{id:"r1"},{id:"r2"}]});
+  assert.equal(calls, 3);
+});
+
+test("target and source arguments form independent read scopes", async () => {
+  let calls=0;
+  const guarded=wrapWithLoopDetection("executeAux4",{
+    description:"execute aux4",schema:z.object({command:z.string()}),
+    invoke:async()=>{calls++;return '{"records":[{"id":"same"}]}' ;}
+  });
+  await guarded.invoke({command:"records list --target alpha"});
+  await guarded.invoke({command:"records list --target beta"});
+  await guarded.invoke({command:"records list --source archive --target beta"});
+  assert.equal(calls,3);
 });
 
 test("different evidence and goal-level browser runs are still allowed", async () => {
@@ -133,9 +162,9 @@ test("read-family limits allow documentation and a corrected child command", asy
         ? "get --recordId: read a record" : '{"records":[{"id":"r7"}]}';
     }
   });
-  await guarded.invoke({ command: "records list --query first" });
-  await guarded.invoke({ command: "records list --query second" });
-  assert.match(String(await guarded.invoke({ command: "records list --query third" })), /identical evidence twice/);
+  await guarded.invoke({ command: 'records list --query "first"' });
+  await guarded.invoke({ command: "records list --query 'first'" });
+  assert.match(String(await guarded.invoke({ command: "records list --query first" })), /this read scope has already returned identical evidence twice/);
   assert.match(String(await guarded.invoke({ command: "records list --help" })), /recordId/);
   assert.match(String(await guarded.invoke({ command: "records list -h" })), /recordId/);
   assert.match(String(await guarded.invoke({ command: "records get --recordId r7" })), /r7/);
@@ -156,29 +185,107 @@ test("the first parameter error supplies recovery guidance without retrying the 
 });
 
 
-test("read-family refusals retain facts and terminate instead of growing forever", async () => {
+test("consecutive novel scopes with no new evidence exhaust a truthful bounded budget", async () => {
   let calls = 0;
   const guarded = wrapWithLoopDetection("executeAux4", {
     description: "execute aux4", schema: z.object({ command: z.string() }),
     invoke: async () => { calls++; return '{"records":[{"id":"r7","status":"inactive"}]}'; }
   });
   await guarded.invoke({ command: "records list --query first" });
-  await guarded.invoke({ command: "records list --query second" });
   let aborted = false;
+  let budgetReached = false;
   for (let i = 0; i < 10; i++) {
+    let result;
     try {
-      const result = String(await guarded.invoke({ command: `records list --query retry-${i}` }));
-      assert.match(result, /Existing evidence:/);
-      assert.match(result, /r7/);
+      result = String(await guarded.invoke({ command: `records list --format format-${i} --limit ${i + 1}` }));
     } catch (error) {
       assert.equal(error.loopAbort, true);
-      assert.match(error.message, /not making progress/);
+      assert.match(error.message, /Read exploration budget exhausted/);
+      assert.match(error.message, /untried scope has not been checked/);
       aborted = true;
       break;
     }
+    if (/Read exploration budget exhausted/.test(result)) {
+      budgetReached = true;
+      assert.match(result, /untried scope has not been checked/);
+      assert.match(result, /r7/);
+    } else {
+      assert.deepEqual(JSON.parse(result), {records:[{id:"r7",status:"inactive"}]});
+    }
   }
+  assert.equal(budgetReached, true);
   assert.equal(aborted, true);
-  assert.equal(calls, 2);
+  assert.equal(calls, 7);
+});
+
+test("new evidence resets a nearly exhausted novel-scope budget", async () => {
+  let calls=0;
+  const guarded=wrapWithLoopDetection("executeAux4",{
+    description:"execute aux4",schema:z.object({command:z.string()}),
+    invoke:async ({command})=>{
+      calls++;
+      return command.includes("new-fact")
+        ? '{"records":[{"id":"new"}]}'
+        : '{"records":[{"id":"existing"}]}' ;
+    }
+  });
+  await guarded.invoke({command:"records list --query base"});
+  for(let i=0;i<5;i++) {
+    assert.match(String(await guarded.invoke({command:`records list --query before-${i}`})),/existing/);
+  }
+  assert.deepEqual(JSON.parse(String(await guarded.invoke({command:"records list --query new-fact"}))),{records:[{id:"new"}]});
+  for(let i=0;i<6;i++) {
+    const result=String(await guarded.invoke({command:`records list --query after-${i}`}));
+    assert.doesNotMatch(result,/budget exhausted/);
+  }
+  assert.match(String(await guarded.invoke({command:"records list --query next-untried"})),/Read exploration budget exhausted/);
+  assert.match(String(await guarded.invoke({command:"records list --query next-untried-2"})),/Read exploration budget exhausted/);
+  assert.equal(calls,13);
+});
+
+test("new evidence resets the no-progress scope budget and targets remain independent", async () => {
+  let calls = 0;
+  const guarded = wrapWithLoopDetection("executeAux4", {
+    description:"execute aux4", schema:z.object({command:z.string()}),
+    invoke:async ({command}) => {
+      calls++;
+      const page=command.match(/--page (\d+)/)?.[1];
+      if (command.includes("--recordId second")) return '{"records":[{"id":"second"}]}';
+      if (page) return JSON.stringify({records:[{id:`page-${page}`} ]});
+      return '{"records":[{"id":"same"}]}';
+    }
+  });
+  await guarded.invoke({command:"records list --query q1"});
+  for (let page=2;page<=7;page++) {
+    const result=String(await guarded.invoke({command:`records list --page ${page}`}));
+    assert.doesNotMatch(result,/budget exhausted/);
+  }
+  assert.deepEqual(JSON.parse(String(await guarded.invoke({command:"records list --page 4 --refresh true"}))),{records:[{id:"page-4"}]});
+  const distinctTarget=String(await guarded.invoke({command:"records list --recordId second"}));
+  assert.deepEqual(JSON.parse(distinctTarget),{records:[{id:"second"}]});
+  assert.equal(calls,9);
+});
+
+test("new evidence resets prior read-refusal escalation", async () => {
+  let calls=0;
+  const guarded=wrapWithLoopDetection("executeAux4",{
+    description:"execute aux4",schema:z.object({command:z.string()}),
+    invoke:async ({command})=>{
+      calls++;
+      return command.includes("second")
+        ? '{"records":[{"id":"new"}]}'
+        : '{"records":[{"id":"existing"}]}';
+    }
+  });
+  await guarded.invoke({command:'records list --query "first"'});
+  await guarded.invoke({command:"records list --query 'first'"});
+  assert.match(String(await guarded.invoke({command:'records list --query  "first"'})),/this read scope has already returned identical evidence twice/);
+  assert.match(String(await guarded.invoke({command:'records list   --query "first"'})),/this read scope has already returned identical evidence twice/);
+
+  await guarded.invoke({command:'records list --query "second"'});
+  await guarded.invoke({command:"records list --query 'second'"});
+  assert.match(String(await guarded.invoke({command:'records list --query  "second"'})),/this read scope has already returned identical evidence twice/);
+  assert.equal(calls,4);
 });
 
 
