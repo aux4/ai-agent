@@ -321,6 +321,38 @@ export const createDirectoryTool = tool(
 
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
+const MAX_JSON_COMPACTION_INPUT = 256 * 1024;
+
+function compactCompleteJson(buffer, maxBytes) {
+  if (buffer.length > MAX_JSON_COMPACTION_INPUT) return null;
+  const text = buffer.toString("utf-8");
+  // Do not turn invalid UTF-8 into replacement characters and then return
+  // changed command output as if it were the original JSON.
+  if (!Buffer.from(text, "utf-8").equals(buffer)) return null;
+  try {
+    JSON.parse(text); // Validate syntax only; never serialize parsed values.
+  } catch {
+    return null;
+  }
+
+  let compact = "";
+  let inString = false;
+  let escaped = false;
+  for (const character of text) {
+    if (inString) {
+      compact += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+    } else if (character === '"') {
+      inString = true;
+      compact += character;
+    } else if (character !== " " && character !== "\t" && character !== "\r" && character !== "\n") {
+      compact += character;
+    }
+  }
+  return Buffer.byteLength(compact, "utf-8") <= maxBytes ? compact : null;
+}
 
 // `cmd` is the display form (`aux4 <command>`, used for the jobs-attach label and
 // timeout/error messages); `argv` is what actually runs: `aux4` is spawned directly with
@@ -417,14 +449,22 @@ function executeWithTimeout(cmd, { argv, stdin, timeout, cwd } = {}) {
         return reject(error);
       }
 
-      const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
       const fullSize = getFileSize(stdoutPath);
 
       if (fullSize > MAX_OUTPUT_LENGTH) {
+        const output = readOutputFileResult(stdoutPath, MAX_OUTPUT_LENGTH);
+        if (!output.truncated) {
+          // A complete compact JSON result is already fully available to the
+          // caller, so do not append the usual truncation notice or retain a
+          // redundant path to the original file.
+          cleanupTempFiles(stdoutPath, stderrPath);
+          return resolve(output.text);
+        }
         // Keep stdout file so the agent can read the full output; only clean stderr
         cleanupTempFiles(null, stderrPath);
-        resolve(stdout + `\n\n[Output truncated: ${fullSize} bytes total. Full output was written to ${stdoutPath}]`);
+        resolve(output.text + `\n\n[Output truncated: ${fullSize} bytes total. Full output was written to ${stdoutPath}]`);
       } else {
+        const stdout = readOutputFile(stdoutPath, MAX_OUTPUT_LENGTH);
         cleanupTempFiles(stdoutPath, stderrPath);
         resolve(stdout);
       }
@@ -442,11 +482,19 @@ function executeWithTimeout(cmd, { argv, stdin, timeout, cwd } = {}) {
 }
 
 export function readOutputFile(filePath, maxBytes) {
+  return readOutputFileResult(filePath, maxBytes).text;
+}
+
+function readOutputFileResult(filePath, maxBytes) {
   try {
     const stat = fs.statSync(filePath);
-    if (stat.size === 0) return "";
+    if (stat.size === 0) return { text: "", truncated: false };
     if (stat.size <= maxBytes) {
-      return fs.readFileSync(filePath, "utf-8");
+      return { text: fs.readFileSync(filePath, "utf-8"), truncated: false };
+    }
+    if (stat.size <= MAX_JSON_COMPACTION_INPUT) {
+      const compact = compactCompleteJson(fs.readFileSync(filePath), maxBytes);
+      if (compact !== null) return { text: compact, truncated: false };
     }
     // Keep both the start and end. Structured command results often put a
     // confirmation contract or status at the start, while useful diagnostics
@@ -461,12 +509,12 @@ export function readOutputFile(filePath, maxBytes) {
       const tail = Buffer.alloc(tailBytes);
       if (headBytes > 0) fs.readSync(fd, head, 0, headBytes, 0);
       if (tailBytes > 0) fs.readSync(fd, tail, 0, tailBytes, stat.size - tailBytes);
-      return head.toString("utf-8") + marker + tail.toString("utf-8");
+      return { text: head.toString("utf-8") + marker + tail.toString("utf-8"), truncated: true };
     } finally {
       fs.closeSync(fd);
     }
   } catch {
-    return "";
+    return { text: "", truncated: true };
   }
 }
 

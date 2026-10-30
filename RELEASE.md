@@ -1,5 +1,9 @@
 # Release 1.3.2
 
+## 1.3.29
+
+- Compact complete oversized JSON command output losslessly when it fits the existing tool-output limit, keeping it parseable for downstream evidence checks.
+
 ## 1.3.28
 
 - Add a model-free internal tool dispatch for exact, controller-supplied `executeAux4` calls, using the normal allowlist, hooks, policy, history, and call budget checks.

@@ -1199,6 +1199,10 @@ unchanged. An unquoted `;`, `|`, `&&`, `||`, `>` or `<` standing as its own word
 with an error (it would mean shell chaining, which does not run here); the same characters
 inside a quoted or larger argument are plain text.
 
+When command output exceeds the 10,000-byte tool limit, a complete valid JSON result is returned
+with only JSON whitespace outside strings removed if that lossless form fits the limit. Other
+oversized output keeps the existing head/tail truncation notice and full-output file reference.
+
 Letting the agent invoke the tool:
 The agent can use the executeAux4 integration to run local commands during a response:
 
