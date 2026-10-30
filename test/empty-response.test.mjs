@@ -144,7 +144,44 @@ test("malformed tool-shaped responses stop after the shared three-attempt protoc
   assert.equal(calls(), 3);
   assert.equal(invoked, 0);
   assert.equal(prompt.modelDiagnostics.filter(item => item.kind === 'malformed-tool-shaped-text').length, 3);
-  assert.equal(prompt.messages.filter(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.')).length, 2);
+  const recoveryMessages = prompt.messages.filter(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.'));
+  assert.equal(recoveryMessages.length, 2);
+  // The agent package's existing history metrics classify this marker as a
+  // protocol error; the attempted plaintext never becomes an actual tool call.
+  assert.equal(recoveryMessages.filter(message => /^The provider returned an unusable tool request\b/i.test(message.content)).length, 2);
+  assert.equal(prompt.messages.filter(message => message.role === 'assistant_with_tool').length, 0);
+  assert.equal(prompt.messages.filter(message => message.role === 'tool').length, 0);
+});
+
+test("malformed text and invalid structured requests consume the same protocol budget", async () => {
+  const invalid = protocolFailure('invalid');
+  const malformed = new AIMessage({ content: 'executeAux4{command:<|"|>records list<|"|>}' });
+  const { prompt, calls } = fakePrompt([invalid, malformed, malformed]);
+  let invoked = 0;
+  prompt.tools.executeAux4 = { invoke: async () => { invoked++; return 'must not run'; } };
+
+  assert.match(await prompt.execute(), /unusable tool request three times/);
+  assert.equal(calls(), 3);
+  assert.equal(invoked, 0);
+  assert.equal(prompt.modelDiagnostics.filter(item => item.kind === 'malformed-tool-shaped-text' || item.kind === 'unusable-tool-request').length, 2);
+  assert.equal(prompt.messages.filter(message => message.role === 'assistant_with_tool').length, 1);
+  assert.equal(prompt.messages.filter(message => message.role === 'tool').length, 1);
+});
+
+test("a valid structured tool call with text content is executed once without protocol repair", async () => {
+  const response = new AIMessage({
+    content: 'executeAux4{command:<|"|>records list<|"|>}',
+    tool_calls: [{ name: 'lookup', args: {}, id: 'structured', type: 'tool_call' }]
+  });
+  const { prompt, calls } = fakePrompt([response, new AIMessage('done')]);
+  let invoked = 0;
+  prompt.tools.lookup = { invoke: async () => { invoked++; return '{"id":"r7"}'; } };
+
+  assert.equal(await prompt.execute(), 'done');
+  assert.equal(calls(), 2);
+  assert.equal(invoked, 1);
+  assert.equal(prompt.modelDiagnostics.length, 0);
+  assert.equal(prompt.messages.some(message => message.role === 'user' && String(message.content).startsWith('The provider returned an unusable tool request.')), false);
 });
 
 test("quoted examples and prose mentioning a tool-shaped string remain ordinary answers", async () => {
