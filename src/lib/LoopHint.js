@@ -90,3 +90,26 @@ export function unansweredLookupRecovery(command, result) {
   if (!data || data.answered !== false) return null;
   return {family:lookup.family,message:"The lookup explicitly did not answer the question. Matching headings or labels do not establish the missing value. Inspect a relevant source or use one materially different available source, preserving the request's constraints. Do not keep rephrasing the same question against the same content. If the required fact is still unavailable, stop with BLOCKED and name it; do not invent it."};
 }
+
+
+// A structured negative answer stays negative when its ranking/session metadata
+// changes. Keep the original tool result in history; only normalize the loop key.
+export function readResultKey(result) {
+  const text = String(result);
+  let data;
+  try { data = JSON.parse(text); } catch { return text; }
+  if (data?.answered === false && typeof data.question === "string" && typeof data.url === "string") {
+    return JSON.stringify({answered:false, question:data.question, url:data.url});
+  }
+  return text;
+}
+
+// A negative answer for one question/page cannot rule out a new question/page.
+export function reusableReadResult(command, result) {
+  let data;
+  try { data = JSON.parse(String(result)); } catch { return true; }
+  if (data?.answered !== false || typeof data.question !== "string" || typeof data.url !== "string") return true;
+  let args;
+  try { args = parseCommandArgs(String(command || "")); } catch { return false; }
+  return args.includes(data.question) && args.includes(data.url);
+}

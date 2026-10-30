@@ -209,3 +209,28 @@ test("completion detection preserves accepted asynchronous changes but excludes 
   assert.equal(changeResultCompleted('{"status":"pending","id":"job7"}'),true);
   assert.equal(changeResultCompleted('saved'),true);
 });
+
+
+test("negative lookup metadata cannot extend a loop, while new questions, sources and changed state remain readable", async () => {
+  let calls = 0;
+  const guarded = wrapWithLoopDetection("executeAux4", {
+    description: "execute aux4", schema:z.object({command:z.string()}),
+    invoke:async ({command}) => {
+      calls++;
+      if (command.startsWith("records run")) return '{"status":"done"}';
+      const question = command.includes("Another question") ? "Another question" : "Which reference applies?";
+      const url = command.includes("elsewhere") ? "https://example.test/elsewhere" : "https://example.test/records";
+      return JSON.stringify({answered:false, question, url, session:`s${calls}`,answerScore:calls/100,matches:[{text:`Heading ${calls}`,score:calls/10}]});
+    }
+  });
+  const base = 'records find --url https://example.test/records --question "Which reference applies?"';
+  await guarded.invoke({command:base});
+  await guarded.invoke({command:base+' --provider alternate'});
+  assert.match(String(await guarded.invoke({command:base+' --granularity sentence'})), /identical evidence twice/);
+  assert.equal(calls, 2);
+  assert.match(String(await guarded.invoke({command:base.replace("Which reference applies?","Another question")})), /answered/);
+  assert.match(String(await guarded.invoke({command:base.replace("/records","/elsewhere")})), /answered/);
+  await guarded.invoke({command:"records run --goal update"});
+  assert.match(String(await guarded.invoke({command:base})), /answered/);
+  assert.equal(calls, 6);
+});

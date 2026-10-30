@@ -5,6 +5,11 @@
 
 
 
+## 1.3.23
+
+- Count repeated structured negative answers by question and source rather than session, ranking metadata, or timings.
+- Keep changed questions, sources, factual results, and post-mutation lookups eligible for execution.
+
 ## 1.3.22
 
 - Match permission wildcards across quoted multiline argument values for both allow and deny rules.

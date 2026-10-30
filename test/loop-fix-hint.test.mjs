@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { repeatFixHint, emptyLookupRecovery, isEmptyLookupResult, requiredInputRecovery, unansweredLookupRecovery } from "../src/lib/LoopHint.js";
+import { repeatFixHint, emptyLookupRecovery, isEmptyLookupResult, requiredInputRecovery, unansweredLookupRecovery, readResultKey, reusableReadResult } from "../src/lib/LoopHint.js";
 
 test("repeatFixHint names the missing flag from aux4's own error", () => {
   const hint = repeatFixHint("Error executing command: Missing required parameter --messageId: The message ID to retrieve");
@@ -68,4 +68,16 @@ test("missing-value feedback also reads the tool's structured field handoff",()=
   const hint=requiredInputRecovery({status:'needs-input',needsInput:{kind:'missing',field:{label:'Contact email'},page:{url:'https://example.test/apply'}}});
   assert.match(hint.message,/Contact email/);
   assert.equal(requiredInputRecovery({status:'needs-input',needsInput:{kind:'confirm',field:{label:'Save'}}}),null);
+});
+
+
+test("negative lookup keys ignore ranking metadata but preserve the question and source", () => {
+  const first = JSON.stringify({answered:false,question:"Which reference applies?",url:"https://example.test/records",session:"s1",answerScore:0.03,matches:[{text:"References",score:0.02}]});
+  const reranked = JSON.stringify({answered:false,question:"Which reference applies?",url:"https://example.test/records",session:"s2",answerScore:0.04,matches:[{text:"Reference list",score:0.05}],wallMs:999});
+  assert.equal(readResultKey(first), readResultKey(reranked));
+  assert.equal(reusableReadResult('records find --url https://example.test/records --question "Which reference applies?" --provider alternate', readResultKey(first)), true);
+  assert.equal(reusableReadResult('records find --url https://example.test/elsewhere --question "Which reference applies?"', readResultKey(first)), false);
+  assert.equal(reusableReadResult('records find --url https://example.test/records --question "Who owns the record?"', readResultKey(first)), false);
+  assert.notEqual(readResultKey('{"answered":true,"answer":"one"}'), readResultKey('{"answered":true,"answer":"two"}'));
+  assert.notEqual(readResultKey('{"id":"r1","score":1}'), readResultKey('{"id":"r1","score":2}'));
 });

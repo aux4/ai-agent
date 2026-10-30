@@ -1,5 +1,5 @@
 import fs from "fs";
-import { repeatFixHint, correctedCommand, isEmptyLookupResult } from "./LoopHint.js";
+import { repeatFixHint, correctedCommand, isEmptyLookupResult, readResultKey, reusableReadResult } from "./LoopHint.js";
 import { parameterErrorHelp, parameterHelpArgs } from "./ParameterHelp.js";
 import path from "path";
 import os from "os";
@@ -1726,6 +1726,16 @@ function readCommandFamily(name, args) {
   return commandPath;
 }
 
+function commandMayChangeState(name, args) {
+  if (name !== "executeAux4") return false;
+  let words;
+  try { words = parseCommandArgs(String(args.command || "")); } catch { return false; }
+  if (words.includes("--help") || words.includes("-h")) return false;
+  const flag = words.findIndex(word => word.startsWith("--"));
+  const command = flag < 0 ? words : words.slice(0, flag);
+  return MUTATION_VERB.test(command.join(" ")) || command.at(-1) === "run";
+}
+
 export function resultShape(result) {
   return String(result)
     .replace(/[0-9a-f]{8,}/gi, "<id>")
@@ -1805,7 +1815,7 @@ export function wrapWithLoopDetection(name, underlyingTool) {
       const readFamily = readCommandFamily(name, cleanArgs);
       const familyResults = readFamily && readResults.get(readFamily);
       const repeatedEvidence = familyResults && [...familyResults.entries()].find(([result, count]) =>
-        count >= (isEmptyLookupResult(args?.command, result) ? 4 : 2));
+        count >= (isEmptyLookupResult(args?.command, result) ? 4 : 2) && reusableReadResult(args?.command, result));
       if (repeatedEvidence) {
         const refused = (refusedReads.get(readFamily) || 0) + 1;
         refusedReads.set(readFamily, refused);
@@ -1828,9 +1838,14 @@ export function wrapWithLoopDetection(name, underlyingTool) {
           readResults.clear();
           refusedReads.clear();
         }
+        if (!target && changeResultCompleted(asText) && commandMayChangeState(name, cleanArgs)) {
+          readResults.clear();
+          refusedReads.clear();
+        }
         if (readFamily && !commandResultFailed(asText)) {
           const results = readResults.get(readFamily) || new Map();
-          results.set(asText, (results.get(asText) || 0) + 1);
+          const evidenceKey = readResultKey(asText);
+          results.set(evidenceKey, (results.get(evidenceKey) || 0) + 1);
           readResults.set(readFamily, results);
         }
         seen.set(key, prior && prior.result === asText
