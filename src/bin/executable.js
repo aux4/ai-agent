@@ -104,7 +104,8 @@ function parsePolicyArg(value) {
         embeddings: JSON.parse(args[23] || "{}"),
         packageDir: args.indexOf("--packageDir") !== -1 ? args[args.indexOf("--packageDir") + 1] : "",
         hooks: args.indexOf("--hooks") !== -1 ? args[args.indexOf("--hooks") + 1] : "",
-        tools: args.indexOf("--tools") !== -1 ? args[args.indexOf("--tools") + 1] : ""
+        tools: args.indexOf("--tools") !== -1 ? args[args.indexOf("--tools") + 1] : "",
+        toolCall: args[24] || ""
       });
     } else if (command === "image") {
       await imageExecutor({

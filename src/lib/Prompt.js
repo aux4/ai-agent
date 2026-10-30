@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
@@ -29,12 +30,34 @@ export class PromptError extends Error {
   }
 }
 
+function persistedConsequentialToolCalls(messages = []) {
+  const ids = new Set();
+  let anonymous = 0;
+  for (const message of messages) {
+    if (message?.role !== "assistant_with_tool") continue;
+    const content = message.content || {};
+    const calls = content.kwargs?.tool_calls
+      || content.kwargs?.additional_kwargs?.tool_calls
+      || content.tool_calls
+      || content.additional_kwargs?.tool_calls
+      || [];
+    if (!Array.isArray(calls)) continue;
+    for (const call of calls) {
+      if (!CONSEQUENTIAL_POLICY_TOOLS.has(call?.name)) continue;
+      if (call.id) ids.add(String(call.id));
+      else anonymous++;
+    }
+  }
+  return ids.size + anonymous;
+}
+
 class Prompt {
   constructor(config = {}, toolsConfig = {}, options = {}) {
-    this.config = config;
+    this.config = config || {};
     this.toolsConfig = toolsConfig;
     this.compactionConfig = options.compaction || null;
     this.policy = options.policy || null;
+    this.toolOnly = options.toolOnly === true;
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
@@ -42,9 +65,12 @@ class Prompt {
     this._emptyLookupHinted = new Set();
     this._requiredInputHinted = new Set();
     this.mcpClient = null;
-    this.apiType = config.api || "chat";
+    this.apiType = this.config.api || "chat";
 
-    if (this.apiType === "codex") {
+    if (this.toolOnly) {
+      this.model = null;
+      this.codexApi = null;
+    } else if (this.apiType === "codex") {
       const codexAuth = loadCodexAuth();
       if (!codexAuth) {
         throw new PromptError("Codex auth not found. Run 'codex login' first.");
@@ -81,10 +107,10 @@ class Prompt {
     // Create tools with configuration if provided
     const configuredTools = Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools;
 
-    const mcpConfigPath = path.join(process.cwd(), "mcp.json");
     let mcpTools = [];
+    const mcpConfigPath = path.join(process.cwd(), "mcp.json");
 
-    if (fs.existsSync(mcpConfigPath)) {
+    if (!this.toolOnly && fs.existsSync(mcpConfigPath)) {
       try {
         const mcpConfig = JSON.parse(fs.readFileSync(mcpConfigPath, "utf-8"));
         this.mcpClient = new MultiServerMCPClient({ ...mcpConfig });
@@ -101,7 +127,17 @@ class Prompt {
     const allowList = parseToolsAllowList(this.toolsConfig.toolNames);
     let effectiveBuiltinTools = configuredTools;
     let effectiveMcpTools = mcpTools;
-    if (allowList) {
+    if (this.toolOnly) {
+      if (allowList && !allowList.includes("executeAux4")) {
+        throw new PromptError('Tool "executeAux4" is not enabled for this run.');
+      }
+      if (!configuredTools.executeAux4) throw new PromptError('Tool "executeAux4" is not available for this run.');
+      // This dispatch has one controller-selected target. Do not start MCP
+      // servers or bind unrelated tools; extra allow-listed MCP names do not
+      // prevent the explicitly permitted executeAux4 call.
+      effectiveBuiltinTools = { executeAux4: configuredTools.executeAux4 };
+      effectiveMcpTools = [];
+    } else if (allowList) {
       try {
         const filtered = applyToolsAllowList(allowList, configuredTools, mcpTools);
         effectiveBuiltinTools = filtered.builtinTools;
@@ -111,7 +147,12 @@ class Prompt {
       }
     }
 
-    if (this.apiType === "codex") {
+    if (this.toolOnly) {
+      this.tools = {
+        ...effectiveBuiltinTools,
+        ...effectiveMcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
+      };
+    } else if (this.apiType === "codex") {
       this.codexApi.bindTools(Object.values(effectiveBuiltinTools));
       if (effectiveMcpTools.length > 0) {
         this.codexApi.bindTools(effectiveMcpTools);
@@ -163,7 +204,81 @@ class Prompt {
           total: historyData.tokenUsage.total || 0
         };
       }
+      const persistedCount = Number.isSafeInteger(historyData.toolCallCount) && historyData.toolCallCount >= 0
+        ? historyData.toolCallCount : 0;
+      this.toolCallCount = Math.max(this.toolCallCount, persistedCount);
     }
+    this.toolCallCount = Math.max(this.toolCallCount, persistedConsequentialToolCalls(this.messages));
+  }
+
+  // Invoke one controller-specified call through the same bound tool wrappers
+  // used by a model turn. This keeps allow-listing, hooks, policy, loop guards,
+  // call budgets, and provider-independent history intact without asking a
+  // model to choose or rewrite the command.
+  async invokeToolCall(name, args) {
+    if (!this.toolOnly) throw new PromptError("Direct tool invocation is available only in tool-only mode.");
+    if (name !== "executeAux4") throw new PromptError(`Direct invocation is restricted to executeAux4, not ${String(name)}.`);
+    const boundTool = this.tools?.[name];
+    if (!boundTool) throw new PromptError(`Tool "${name}" is not enabled for this run.`);
+    if (!args || typeof args !== "object" || Array.isArray(args)) throw new PromptError("Tool arguments must be a JSON object.");
+    const supportedArgs = new Set(["command", "stdin", "timeout", "cwd"]);
+    const unexpected = Object.keys(args).filter(key => !supportedArgs.has(key));
+    if (unexpected.length) throw new PromptError(`Unexpected executeAux4 argument(s): ${unexpected.join(", ")}.`);
+
+    let cleanArgs;
+    try {
+      cleanArgs = boundTool.schema.parse(args);
+    } catch (error) {
+      throw new PromptError(`Invalid ${name} arguments: ${error.message}`, error);
+    }
+    if (typeof cleanArgs.command !== "string" || !cleanArgs.command.trim()) {
+      throw new PromptError("executeAux4 requires a non-empty command string.");
+    }
+
+    const callId = randomUUID();
+    const timestamp = Date.now();
+    const toolCall = { id: callId, name, args: cleanArgs, type: "tool_call" };
+    this.messages.push({
+      role: "assistant_with_tool",
+      content: { kwargs: { content: "", tool_calls: [toolCall] } },
+      timestamp
+    });
+    // Persist the call before running it, matching a normal model-generated
+    // tool call so the monitor can observe the attempt even if execution stalls.
+    this.saveHistory();
+
+    let invokeArgs = cleanArgs;
+    const policyDecisionCount = this.policy?.decisions?.length || 0;
+    if (CONSEQUENTIAL_POLICY_TOOLS.has(name)) this.toolCallCount += 1;
+    if (this.policy && CONSEQUENTIAL_POLICY_TOOLS.has(name)) {
+      invokeArgs = { ...cleanArgs, __policyCallId: callId };
+    }
+
+    let content;
+    try {
+      content = await boundTool.invoke(invokeArgs);
+    } catch (error) {
+      content = `Error executing tool "${name}": ${error.message}`;
+    }
+
+    const result = {
+      role: "tool",
+      content: typeof content === "string" ? content : JSON.stringify(content),
+      tool_call_id: callId,
+      name,
+      timestamp: Date.now()
+    };
+    if (this.policy && this.historyFile) {
+      // LangChain versions differ on whether schema parsing preserves the
+      // internal call-id field. A single-call dispatch can safely associate
+      // the sole new policy record when the ID was stripped at that boundary.
+      const decision = this.policy.takeDecision(callId)
+        || (this.policy.decisions?.length === policyDecisionCount + 1 ? this.policy.decisions[policyDecisionCount] : null);
+      if (decision) result.policy = decision;
+    }
+    this.messages.push(result);
+    this.saveHistory(true);
+    return result.content;
   }
 
   setOutputSchema(schema) {
@@ -464,8 +579,8 @@ class Prompt {
               // Count consequential tool calls toward the policy budget and pass the
               // call id so the policy can record its decision against this entry.
               let invokeArgs = toolCall.args;
+              if (CONSEQUENTIAL_POLICY_TOOLS.has(toolCall.name)) this.toolCallCount += 1;
               if (this.policy && CONSEQUENTIAL_POLICY_TOOLS.has(toolCall.name)) {
-                this.toolCallCount += 1;
                 invokeArgs = { ...toolCall.args, __policyCallId: toolCall.id };
               }
 
@@ -754,6 +869,7 @@ class Prompt {
       const data = JSON.stringify({
         messages: simplifiedMessages,
         tokenUsage: this.tokenUsage,
+        toolCallCount: this.toolCallCount,
         ...(this.modelDiagnostics.length ? { modelDiagnostics: this.modelDiagnostics } : {})
       });
       if (data.length < 3) return;

@@ -9,9 +9,25 @@ import { Policy } from "../../lib/Policy.js";
 
 export async function askExecutor(params) {
   try {
+    let toolCall = null;
+    const hasToolCall = params.toolCall !== undefined && params.toolCall !== null && params.toolCall !== "";
+    if (hasToolCall) {
+      try {
+        toolCall = typeof params.toolCall === "string" ? JSON.parse(params.toolCall) : params.toolCall;
+      } catch (error) {
+        throw new PromptError(`Invalid --toolCall JSON: ${error.message}`, error);
+      }
+      if (!toolCall || typeof toolCall !== "object" || Array.isArray(toolCall)) {
+        throw new PromptError("--toolCall must be a JSON object with name and args.");
+      }
+      const unexpected = Object.keys(toolCall).filter(key => key !== "name" && key !== "args");
+      if (unexpected.length || typeof toolCall.name !== "string" || !Object.hasOwn(toolCall, "args")) {
+        throw new PromptError("--toolCall must contain only name and args fields.");
+      }
+    }
     const baseInstructions = params.baseInstructions;
     const instructions = params.instructions;
-    const model = params.useModel
+    const model = hasToolCall ? null : params.useModel
       ? resolveFromConfig({ models: params.models, model: params.model }, params.useModel)
       : (params.models && Object.keys(params.models).length > 0
         ? resolveFromConfig({ models: params.models, model: params.model })
@@ -90,9 +106,25 @@ export async function askExecutor(params) {
     if (params.tools && typeof params.tools === "string" && params.tools.trim() !== "") {
       toolsConfig.toolNames = params.tools;
     }
+    if (hasToolCall) {
+      toolsConfig.request = question;
+      toolsConfig.historyFile = history || "";
+      toolsConfig.session = history || params.runId || "session";
+    }
 
-    const prompt = new Prompt(model, toolsConfig, { compaction, policy });
+    const prompt = new Prompt(model, toolsConfig, { compaction, policy, toolOnly: hasToolCall });
     await prompt.init();
+
+    if (hasToolCall) {
+      try {
+        await prompt.history(history);
+        const result = await prompt.invokeToolCall(toolCall.name, toolCall.args);
+        process.stdout.write(`${result}\n`);
+      } finally {
+        await prompt.close();
+      }
+      return;
+    }
 
     if (bio && typeof bio === "object" && Object.keys(bio).length > 0) {
       const bioParts = [];

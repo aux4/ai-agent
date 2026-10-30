@@ -70,6 +70,8 @@ Key variables (from the package help):
 - tools (default: "") — comma-separated allow-list of tools to bind, e.g. `executeAux4,currentDateTime`; empty binds every tool, unchanged from before (see [Tool Allow-List](#tool-allow-list)).
 - question (arg: true) — the question to ask (positional/argument).
 
+`--toolCall` is an internal controller interface for a single exact tool invocation without a model request. It accepts only `executeAux4`, and that tool must also appear in the original `--tools` allow-list. Other names in the allow-list are ignored for this model-free invocation and are not initialized.
+
 Usage examples:
 
 1) Basic question:

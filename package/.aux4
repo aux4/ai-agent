@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "ai-agent",
-  "version": "1.3.27",
+  "version": "1.3.28",
   "description": "AI agent",
   "tags": [
     "ai",
@@ -149,7 +149,7 @@
         {
           "name": "ask",
           "execute": [
-            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, embeddings) --packageDir ${packageDir} --hooks ${hooks} --tools ${tools}"
+            "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, embeddings, toolCall) --packageDir ${packageDir} --hooks ${hooks} --tools ${tools}"
           ],
           "help": {
             "text": "Ask your question",
@@ -278,6 +278,11 @@
                 "name": "question",
                 "text": "The question to ask",
                 "arg": true
+              },
+              {
+                "name": "toolCall",
+                "text": "Internal: invoke one prevalidated tool call through the normal tool checks without a model request (JSON name/args object)",
+                "default": ""
               }
             ]
           }

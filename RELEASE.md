@@ -1,5 +1,10 @@
 # Release 1.3.2
 
+## 1.3.28
+
+- Add a model-free internal tool dispatch for exact, controller-supplied `executeAux4` calls, using the normal allowlist, hooks, policy, history, and call budget checks.
+- Require `executeAux4` in the original tool allowlist for internal dispatch; other allowed tools are not initialized for this model-free path.
+
 ## 1.3.27
 
 - Report non-interactive `askUser` calls as unanswered; do not treat the fallback as permission or evidence.
