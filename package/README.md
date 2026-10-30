@@ -808,7 +808,7 @@ The agent comes with a set of built-in tools that the LLM can call during execut
 
 The `askUser` tool lets the agent prompt the user interactively when it needs clarification, a preference, or a decision before proceeding. The question is displayed on stderr and the user types their response on stdin.
 
-**Non-interactive sessions:** When no TTY is available (e.g., piped input), the tool returns a message telling the agent to proceed with its best judgment.
+**Non-interactive sessions:** When no TTY is available (e.g., piped input), the tool reports `NO_ANSWER`: no user response was received. This is not permission or evidence and does not fill a required factual value. The agent may still make discretionary choices the user already authorized.
 
 **Note:** The agent is instructed to always call `askUser` alone, never in parallel with other tools, to avoid stdin conflicts.
 

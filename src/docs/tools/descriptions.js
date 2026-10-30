@@ -65,7 +65,9 @@ export const askUserDesc =
   "Ask the user a single, focused question and wait for their typed reply, for clarification, a " +
   "missing required detail, or confirmation before a destructive/irreversible action. Only ask " +
   "when you can't reasonably infer the answer. Always call this alone -- never alongside other " +
-  "tool calls in the same turn, since it reads from stdin.";
+  "tool calls in the same turn, since it reads from stdin. In a non-interactive session, no " +
+  "answer is received: don't treat that as permission or evidence, and don't invent a required " +
+  "fact; user-authorized discretionary choices still apply.";
 
 export const currentDateTimeDesc =
   "Return the current local and UTC date/time. Use whenever you need today's date, the day of " +

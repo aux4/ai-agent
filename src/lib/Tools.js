@@ -1454,18 +1454,22 @@ export const createReadSkillTool = (skillsDir) => tool(
   }
 );
 
-export const createAskUserTool = () => tool(
+export const createAskUserTool = ({
+  stdin = process.stdin,
+  stderr = process.stderr,
+  createInterface = readline.createInterface
+} = {}) => tool(
   async ({ question }) => {
-    if (!process.stdin.isTTY) {
-      return "Non-interactive session detected (no TTY). Proceed with your best judgment based on the available context.";
+    if (!stdin.isTTY) {
+      return "NO_ANSWER: This session is non-interactive, so no user response was received. This is not user authorization or evidence. Continue only with values supplied by the user or supported by a relevant source; if a required factual value is still missing, stop and report it. You may still use judgment for discretionary choices the user authorized.";
     }
 
     const ask = () => new Promise((resolve) => {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stderr
+      const rl = createInterface({
+        input: stdin,
+        output: stderr
       });
-      process.stderr.write(`\n🤖 ${question}\n> `);
+      stderr.write(`\n🤖 ${question}\n> `);
       rl.on("line", (answer) => {
         rl.close();
         resolve(answer);

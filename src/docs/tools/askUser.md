@@ -4,7 +4,7 @@ Ask the user a question and wait for their typed response. Use this when you nee
 
 ## Overview
 
-This tool prompts the user interactively via the terminal. The user's response is returned as text so you can incorporate it into your next steps. If the session is non-interactive (no TTY), the tool returns a message indicating you should proceed with your best judgment.
+This tool prompts the user interactively via the terminal. The user's response is returned as text so you can incorporate it into your next steps. If the session is non-interactive (no TTY), no user response was received. Treat that as unanswered: it is not permission, evidence, or a choice of default. Continue with choices the user already authorized, and use values supported by the request or a relevant source. If a required factual value remains unavailable, stop and report what is missing.
 
 ## Parameters
 
@@ -34,4 +34,4 @@ This tool prompts the user interactively via the terminal. The user's response i
 ## Response Format
 
 - **✅ Interactive session:** Returns `"User responded: <their answer>"`
-- **⚠️ Non-interactive session:** Returns a message indicating no TTY is available; proceed with your best judgment
+- **⚠️ Non-interactive session:** Returns `NO_ANSWER` with a message that no response was received. This does not authorize a guess or supply missing evidence; discretionary choices explicitly authorized by the user remain allowed.

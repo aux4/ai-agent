@@ -1,5 +1,9 @@
 # Release 1.3.2
 
+## 1.3.27
+
+- Report non-interactive `askUser` calls as unanswered; do not treat the fallback as permission or evidence.
+
 ## 1.3.26
 
 - Recover boundedly when a standalone assistant response imitates a bound tool call in plaintext; report a protocol error and require a real structured tool call without executing or parsing the text.
