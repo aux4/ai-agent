@@ -12,7 +12,7 @@ results are unhelpful, simply answer from your own knowledge.
 | `storage` | string | No | Vector store path. Defaults to the configured one |
 | `limit` | number | No | Maximum results (default 5) |
 | `source` | string | No | Restrict to one source document |
-| `embeddingsType` | string | No | Embeddings to use (default `openai`) |
+| `embeddingsType` | string | No | Optional provider. The RAG package uses local embeddings for new stores and detects legacy stores that used OpenAI. |
 | `embeddingsConfig` | object | No | Embeddings configuration |
 
 Full details: `readReference("searchContext.md")`.

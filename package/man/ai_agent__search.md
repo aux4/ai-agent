@@ -1,3 +1,7 @@
+#### Compatibility
+
+The `aux4/ai-rag` package owns the retrieval implementation and contributes this command under the established `aux4 ai agent` namespace.
+
 #### Description
 
 Search queries over the agent's learned documents and return the most relevant matches from the local vector store. The command looks up the provided query in the specified storage directory, optionally filters by a source file path, and returns up to the requested number of results. Output can be returned as plain text (default) or as JSON for programmatic consumption. If no documents have been indexed yet the command returns an error asking you to add documents using the learn command.

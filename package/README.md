@@ -8,6 +8,10 @@ Lightweight AI agent runtime for aux4 with RAG, tool usage, image generation, an
 - Let the agent call local aux4 commands as tools during conversations
 - Inspect conversation history and run interactive chat loops
 
+## Retrieval and semantic search
+
+Document ingestion, vector storage, and retrieval are provided by the independent `aux4/ai-rag` package. Use `aux4 ai agent learn|search|forget`; `aux4/ai-rag` supplies these commands while the agent runtime uses its retrieval API.
+
 ## Installation
 
 ```bash
@@ -332,7 +336,7 @@ Commands:
 - search
 - forget
 
-### aux4 ai agent learn
+### aux4 ai agent learn (implemented by ai-rag)
 Overview:
 Index one or more documents into the local storage directory (.context by default), preparing them for semantic search.
 
@@ -391,7 +395,7 @@ Notes:
 
 For more details see [aux4 ai agent learn](./commands/ai/agent/learn).
 
-### aux4 ai agent search
+### aux4 ai agent search (implemented by ai-rag)
 Overview:
 Run a query against the local vector store to retrieve relevant text snippets or structured data.
 
@@ -416,7 +420,7 @@ If no documents exist in storage, the command returns an error:
 
 For more details see [aux4 ai agent search](./commands/ai/agent/search).
 
-### aux4 ai agent forget
+### aux4 ai agent forget (implemented by ai-rag)
 Overview:
 Remove the local vector store files to forget learned documents. This is handy in tests or when you want to reset state.
 

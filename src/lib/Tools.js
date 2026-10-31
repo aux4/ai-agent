@@ -5,8 +5,6 @@ import { spawn, spawnSync } from "child_process";
 import readline from "node:readline";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
-import LlmStore from "./LlmStore.js";
-import { getEmbeddings } from "./Embeddings.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
 
 // Import tool descriptions
@@ -1668,7 +1666,7 @@ export const createAskUserTool = () => tool(
 export const askUserTool = createAskUserTool();
 
 export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig = {}) => tool(
-  async ({ query, storage, limit = 5, source, embeddingsType = "openai", embeddingsConfig = {} }) => {
+  async ({ query, storage, limit = 5, source, embeddingsType, embeddingsConfig = {} }) => {
     try {
       // Use provided storage or fall back to default
       const storageToUse = storage || defaultStorage;
@@ -1686,22 +1684,30 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
         throw new Error("Access denied");
       }
 
-      // Initialize embeddings
-      const Embeddings = getEmbeddings(embeddingsType);
-      const embeddings = new Embeddings(embeddingsConfigToUse);
+      const ragEmbeddings = Object.keys(embeddingsConfigToUse || {}).length > 0
+        ? { type: embeddingsType, config: embeddingsConfigToUse }
+        : (embeddingsType ? { type: embeddingsType } : {});
+      const ragArgs = [
+        "ai", "agent", "search",
+        "--storage", storageDirectory,
+        "--format", "json",
+        "--limit", String(parseInt(limit, 10) || 5),
+        "--embeddings", JSON.stringify(ragEmbeddings)
+      ];
+      if (source) ragArgs.push("--source", source);
+      ragArgs.push(query);
 
-      // Initialize and load the store
-      const store = new LlmStore(storageDirectory, embeddings);
-      await store.load();
-
-      // Search options - handle empty index gracefully
-      const searchLimit = parseInt(limit);
-      const searchOptions = {
-        limit: searchLimit,
-        source: source
-      };
-
-      const results = await store.search(query, searchOptions);
+      const result = spawnSync("aux4", ragArgs, {
+        encoding: "utf-8",
+        cwd: currentDirectory,
+        maxBuffer: 10 * 1024 * 1024
+      });
+      if (result.error) throw result.error;
+      if (result.status !== 0) {
+        const failure = (result.stderr || result.stdout || `aux4 ai agent search exited with code ${result.status}`).trim();
+        throw new Error(failure);
+      }
+      const results = JSON.parse(result.stdout || "[]");
 
       // Return the page content as text context
       // If no results or empty results, return special marker
@@ -1733,7 +1739,7 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
       storage: z.string().optional().describe("Path to the storage directory containing the vector store (optional if default is configured)"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 5)"),
       source: z.string().optional().describe("Optional: search only in a specific source file"),
-      embeddingsType: z.string().optional().describe("Type of embeddings to use (default: 'openai')"),
+      embeddingsType: z.string().optional().describe("Optional embeddings provider; otherwise ai-rag selects local for new stores and preserves legacy stores"),
       embeddingsConfig: z.object({}).optional().describe("Configuration object for the embeddings")
     })
   }

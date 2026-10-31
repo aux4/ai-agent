@@ -41,94 +41,6 @@
       "name": "ai:agent",
       "commands": [
         {
-          "name": "learn",
-          "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs learn values(storage, doc, type)"
-          ],
-          "help": {
-            "text": "Learn from a document or folder",
-            "variables": [
-              {
-                "name": "storage",
-                "text": "The storage directory",
-                "default": ".context"
-              },
-              {
-                "name": "doc",
-                "text": "The document or folder to learn from",
-                "arg": true
-              },
-              {
-                "name": "type",
-                "text": "The type of document",
-                "default": ""
-              }
-            ]
-          }
-        },
-        {
-          "name": "search",
-          "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs search values(storage, format, source, limit, query)"
-          ],
-          "help": {
-            "text": "Search on documents",
-            "variables": [
-              {
-                "name": "storage",
-                "text": "The storage directory",
-                "default": ".context"
-              },
-              {
-                "name": "format",
-                "text": "The format of the output",
-                "default": "text",
-                "options": [
-                  "json",
-                  "text"
-                ]
-              },
-              {
-                "name": "source",
-                "text": "The source file path",
-                "default": ""
-              },
-              {
-                "name": "limit",
-                "text": "The number of results to return",
-                "default": "1"
-              },
-              {
-                "name": "query",
-                "text": "The query to search for",
-                "arg": true
-              }
-            ]
-          }
-        },
-        {
-          "name": "forget",
-          "execute": [
-            "node ${packageDir}/lib/aux4-ai-agent.cjs forget values(storage, doc)"
-          ],
-          "help": {
-            "text": "Forget learned documents",
-            "variables": [
-              {
-                "name": "storage",
-                "text": "The storage directory",
-                "default": ".context"
-              },
-              {
-                "name": "doc",
-                "text": "File or folder to forget (all if omitted)",
-                "default": "",
-                "arg": true
-              }
-            ]
-          }
-        },
-        {
           "name": "ask",
           "execute": [
             "stdin:node ${packageDir}/lib/aux4-ai-agent.cjs ask values(baseInstructions, instructions, role, history, outputSchema, question, image, context, model, storage, stream, autoCompact, compaction, bio, permissions, models, useModel, references, skills, policy, runId, costs, tools) --packageDir ${packageDir}"
@@ -647,5 +559,8 @@
         }
       ]
     }
+  ],
+  "dependencies": [
+    "aux4/ai-rag"
   ]
 }
