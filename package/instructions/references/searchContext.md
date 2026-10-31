@@ -52,7 +52,7 @@ This tool provides **intelligent semantic search** through the LlmStore vector d
 | `storage` | string | ❌ No | Default storage | Path to vector store directory. Uses configured default if not provided |
 | `limit` | number | ❌ No | `5` | Maximum number of results to return (1-50 recommended) |
 | `source` | string | ❌ No | All sources | Filter results to specific source file or document |
-| `embeddingsType` | string | ❌ No | `"openai"` | Type of embeddings to use for search (`openai`, `local`, etc.) |
+| `embeddingsType` | string | ❌ No | Store-compatible default | Optional embeddings provider. New stores default to local; legacy stores without metadata retain the historical OpenAI default. |
 | `embeddingsConfig` | object | ❌ No | Default config | Configuration object for the embeddings system |
 
 ## How It Works
