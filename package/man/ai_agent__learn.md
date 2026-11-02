@@ -1,3 +1,7 @@
+#### Compatibility
+
+The `aux4/ai-rag` package owns the retrieval implementation and contributes this command under the established `aux4 ai agent` namespace.
+
 #### Description
 
 The learn command ingests a document or folder into the AI agent's persistent storage so the agent can later search and answer questions based on that content. You pass the path to a file or directory as a positional argument; the command processes and stores the content (text, embeddings and metadata) under the specified storage directory.

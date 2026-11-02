@@ -1,3 +1,7 @@
+#### Compatibility
+
+The `aux4/ai-rag` package owns the retrieval implementation and contributes this command under the established `aux4 ai agent` namespace.
+
 #### Description
 
 Remove learned documents from the vector store. When called without arguments, deletes all store files (docstore, FAISS index, and ID mapping) to forget everything. When given a file or folder path, selectively removes only the embeddings for that file or all files under that folder, preserving the rest of the store.
