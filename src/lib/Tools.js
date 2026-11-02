@@ -1448,7 +1448,7 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
         "--embeddings", JSON.stringify(ragEmbeddings)
       ];
       if (source) ragArgs.push("--source", source);
-      ragArgs.push(query);
+      ragArgs.push(`--query=${query}`);
 
       const result = spawnSync("aux4", ragArgs, {
         encoding: "utf-8",
