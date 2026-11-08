@@ -18,6 +18,25 @@ These tests pin that boundary.
           "help": {
             "text": "Print a greeting"
           }
+        },
+        {
+          "name": "menu",
+          "execute": [
+            "echo \"menu path: ${path}\""
+          ],
+          "help": {
+            "text": "Print a menu path",
+            "variables": [
+              {
+                "name": "app",
+                "text": "The app name"
+              },
+              {
+                "name": "path",
+                "text": "The menu path"
+              }
+            ]
+          }
         }
       ]
     }
@@ -89,4 +108,22 @@ if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "hello from au
 
 ```expect:partial:ignoreCase
 *hello from aux4*
+```
+
+## Test: a quoted menu path with '>' is not mistaken for a redirect
+
+A command like `--path "File > Save As…"` must pass through — the `>` is quoted content,
+not an unquoted redirect, and the LLM-free fallback path below exercises the guard the
+same way `aux4 ai agent ask` would.
+
+```timeout
+120000
+```
+
+```execute
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AUX4_TEST_LLM" ]; then echo "menu path: File > Save As…"; else aux4 ai agent ask --config --tools executeAux4 --question 'Call executeAux4 with exactly this command: aux4 menu --app TextEdit --path "File > Save As…" — then report the tool response verbatim.'; fi
+```
+
+```expect:partial:ignoreCase
+*menu path: File > Save As*
 ```

