@@ -13,7 +13,7 @@ sleep 1
 ```afterAll
 kill "$(cat chatgpt-mock-server.pid)" 2>/dev/null || true
 rm -rf chatgpt-mock-server.pid chatgpt-mock-server.log
-rm -rf chatgpt-home-signed-out chatgpt-home-signed-in chatgpt-home-logout chatgpt-home-shape chatgpt-home-refresh chatgpt-home-none
+rm -rf chatgpt-home-signed-out chatgpt-home-signed-in chatgpt-home-logout chatgpt-home-shape chatgpt-home-refresh chatgpt-home-none chatgpt-home-codex-alias
 ```
 
 ## auth status when signed out
@@ -127,6 +127,44 @@ HOME=./chatgpt-home-shape AUX4_CHATGPT_RESOURCE=http://127.0.0.1:8931 aux4 ai ag
 
 ```expect
 VALID:valid-access-token
+```
+
+## api: codex deprecated alias
+
+```file:chatgpt-home-codex-alias/.config/aux4-ai-agent/chatgpt-auth.json
+{
+  "issuer": "http://127.0.0.1:8931",
+  "subject": "sub-123",
+  "email": "person@example.com",
+  "name": "Test Person",
+  "client_id": "test-client-id",
+  "ext_agent_host_id": "urn:uuid:test-host",
+  "id_token": "fake.id.token",
+  "access_token": "valid-access-token",
+  "refresh_token": "valid-refresh-token",
+  "token_type": "Bearer",
+  "expires_at": 4102444800000,
+  "scopes": ["openid", "profile", "email", "offline_access", "resource.invoke", "chatgpt.tokens.use.direct"],
+  "saved_at": "2024-01-01T00:00:00.000Z"
+}
+```
+
+### should route through the same ChatGPT Responses endpoint and print one deprecation warning
+
+```timeout
+15000
+```
+
+```execute
+HOME=./chatgpt-home-codex-alias AUX4_CHATGPT_RESOURCE=http://127.0.0.1:8931 aux4 ai agent ask --model '{"api":"codex","config":{"model":"mock-chatgpt-model"}}' "say hi"
+```
+
+```expect
+VALID:valid-access-token
+```
+
+```error:partial
+api: codex is deprecated; use api: chatgpt — sign in with `aux4 ai agent auth login`
 ```
 
 ## token refresh on expiry

@@ -680,42 +680,10 @@ The sign-in uses OpenAI's open-source Sign in with ChatGPT flow, saves protected
 
 ---
 
-## Codex (legacy)
-
-`api: codex` is kept for backward compatibility with configs created before `aux4 ai agent auth` existed. It uses the separate `codex` CLI's own login flow and OAuth tokens from `~/.codex/auth.json`, instead of aux4's self-contained sign-in. **New setups should use [Sign in with ChatGPT](#sign-in-with-chatgpt) (`api: chatgpt`) instead** — it does not require installing another CLI.
-
-### Prerequisites
-
-Login with the Codex CLI once:
-
-```bash
-npx @openai/codex login
-```
-
-### Configuration
-
-```yaml
-config:
-  agent:
-    model:
-      api: codex
-      config:
-        model: gpt-5.3-codex
-```
-
-Or inline:
-
-```bash
-aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "What time is it?"
-```
-
-### How it works
-
-- Reads OAuth tokens from `~/.codex/auth.json` (created by `codex login`)
-- Refreshes the access token before each API call (tokens are short-lived)
-- Calls `chatgpt.com/backend-api/codex/responses` instead of `api.openai.com`
-- `executeAux4` tool, streaming, history, compaction, and skills work the same way as `api: chatgpt`
-- Persists refreshed tokens back to `~/.codex/auth.json` for other tools to use
+**Deprecated alias:** `api: codex` is no longer a separate provider. It routes through the
+same Sign in with ChatGPT path as `api: chatgpt` and prints a one-line deprecation warning to
+stderr. Existing configs keep working — switch them to `api: chatgpt` and run
+`aux4 ai agent auth login` when convenient.
 
 ---
 

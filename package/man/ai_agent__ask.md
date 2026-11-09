@@ -17,7 +17,7 @@ Key features:
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
-- **ChatGPT plan usage** — sign in with `aux4 ai agent auth login`, then set `api: chatgpt` and a model from `aux4 ai agent auth models`; `api: codex` (OAuth via the separate `codex` CLI) is still supported for existing configs
+- **ChatGPT plan usage** — sign in with `aux4 ai agent auth login`, then set `api: chatgpt` and a model from `aux4 ai agent auth models`; `api: codex` is a deprecated alias that routes through the same path and prints a one-line deprecation warning to stderr
 
 #### Usage
 

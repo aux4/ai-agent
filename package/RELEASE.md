@@ -1,5 +1,15 @@
 # Release notes
 
+## Codex provider removed — `api: codex` is now a deprecated alias for `api: chatgpt`
+
+The separate Codex OAuth path (the `codex`-CLI-dependent provider reading `~/.codex/auth.json`)
+has been removed. `api: codex` still works in existing configs: it now routes through the same
+Sign in with ChatGPT path as `api: chatgpt` and prints one deprecation warning to stderr —
+`api: codex is deprecated; use api: chatgpt — sign in with` `aux4 ai agent auth login`. The
+configured model is passed through unchanged; if it's a Codex-only model id the ChatGPT API
+doesn't serve, the API's own error surfaces rather than being silently rewritten. Update configs
+to `api: chatgpt` and run `aux4 ai agent auth login` when convenient.
+
 ## Sign in with ChatGPT — use your ChatGPT plan without an API key
 
 `aux4 ai agent auth login` signs in with the same "Sign in with ChatGPT" OAuth flow used by
@@ -25,9 +35,9 @@ config:
 ```
 
 Requests go to `https://api.openai.com/v1/responses` with `store:false`, streamed, authenticated
-with the signed-in bearer token. `api: codex` (the older, `codex`-CLI-dependent path reading
-`~/.codex/auth.json`) still works unchanged for existing configs, but `api: chatgpt` is now the
-recommended, self-contained way to use ChatGPT plan credits.
+with the signed-in bearer token. `api: codex` is a deprecated alias that now routes through this
+same path (see above) — `api: chatgpt` is the recommended, self-contained way to use ChatGPT plan
+credits.
 
 ## Built-in tools are now dispatched as `aux4 ai agent tool` commands
 

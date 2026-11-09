@@ -12,8 +12,6 @@ import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
 import { shouldCompact, compactMessages } from "./Compaction.js";
 import { ChatGPTApi } from "./ChatGPTApi.js";
 import { getChatGPTAuth } from "./ChatGPTAuth.js";
-import { CodexApi } from "./CodexApi.js";
-import { loadCodexAuth } from "./TokenRefresh.js";
 import { GeminiCliApi } from "./GeminiCliApi.js";
 import { loadGeminiAuth } from "./GeminiAuth.js";
 
@@ -41,16 +39,16 @@ class Prompt {
     this.apiType = config.api || "chat";
 
     if (this.apiType === "codex") {
-      // Legacy path: relies on the separate `codex` CLI's own login flow and
-      // ~/.codex/auth.json. Kept for backward compatibility (aux4/agent-connector
-      // still configures api: codex). Prefer api: chatgpt — self-contained OAuth
-      // via 'aux4 ai agent auth login', no external CLI required.
-      const codexAuth = loadCodexAuth();
-      if (!codexAuth) {
-        throw new PromptError("Codex auth not found. Run 'codex login' first, or switch to api: chatgpt and run 'aux4 ai agent auth login'.");
-      }
-      this.codexApi = new CodexApi({ ...(config.config || {}), ...codexAuth });
-    } else if (this.apiType === "chatgpt") {
+      // Deprecated alias: `api: codex` used to be a separate OAuth path relying on the
+      // `codex` CLI's own login flow and ~/.codex/auth.json. The Codex provider was
+      // removed; `api: codex` now routes through the same Sign-in-with-ChatGPT path as
+      // `api: chatgpt`. The configured model is passed through unchanged — if it's a
+      // Codex-only model id the ChatGPT API doesn't serve, the API's own error surfaces.
+      process.stderr.write("api: codex is deprecated; use api: chatgpt — sign in with `aux4 ai agent auth login`\n");
+      this.apiType = "chatgpt";
+    }
+
+    if (this.apiType === "chatgpt") {
       if (!getChatGPTAuth()) {
         throw new PromptError("ChatGPT sign-in not found. Run 'aux4 ai agent auth login' first.");
       }
@@ -107,10 +105,7 @@ class Prompt {
     // Create tools with configuration if provided
     const configuredTools = createTools({ ...this.toolsConfig, tools: ["executeAux4"] });
 
-    if (this.apiType === "codex") {
-      this.codexApi.bindTools([configuredTools.executeAux4]);
-      this.tools = { executeAux4: configuredTools.executeAux4 };
-    } else if (this.apiType === "chatgpt") {
+    if (this.apiType === "chatgpt") {
       this.responsesApi.bindTools([configuredTools.executeAux4]);
       this.tools = { executeAux4: configuredTools.executeAux4 };
     } else if (this.apiType === "gemini-cli") {
@@ -232,10 +227,6 @@ class Prompt {
   async execute() {
     if (!Array.isArray(this.messages)) {
       throw new Error(`Messages is not an array: ${typeof this.messages}`);
-    }
-
-    if (this.apiType === "codex") {
-      return await this._executeCodex();
     }
 
     if (this.apiType === "chatgpt") {
@@ -545,59 +536,6 @@ class Prompt {
     }
 
     return accumulated;
-  }
-
-  async _executeCodex() {
-    try {
-      const result = await this.codexApi.execute(this.messages, {
-        streaming: this.streaming && !this.outputSchema,
-        tokenCallback: this.tokenCallback,
-        outputSchema: this.outputSchema
-      });
-
-      this.tokenUsage.input += result.usage.input || 0;
-      this.tokenUsage.output += result.usage.output || 0;
-      this.tokenUsage.cached += result.usage.cached || 0;
-      this.tokenUsage.total += (result.usage.input || 0) + (result.usage.output || 0);
-
-      let answer = result.answer;
-
-      if (this.outputSchema) {
-        let jsonStr = answer.trim();
-        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-        if (codeBlockMatch) {
-          jsonStr = codeBlockMatch[1].trim();
-        }
-        const zodSchema = buildZodSchema(this.outputSchema);
-        const parsed = zodSchema.parse(JSON.parse(jsonStr));
-        answer = JSON.stringify(parsed);
-      }
-
-      this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
-
-      if (this.compactionConfig && this.compactionConfig.contextWindow) {
-        const promptTokens = result.usage.input || 0;
-        if (shouldCompact(promptTokens, this.compactionConfig)) {
-          const compactionModel = this.compactionConfig.model || this.config;
-          try {
-            this.messages = await compactMessages(this.messages, compactionModel, {
-              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
-              promptFile: this.compactionConfig.promptFile,
-              responsesApi: (!this.compactionConfig.model && this.apiType === "codex") ? this.codexApi : null
-            });
-            this.compacted = true;
-          } catch (err) {
-            console.error(`[compact] Warning: ${err.message}`);
-          }
-        }
-      }
-
-      this.saveHistory(true);
-      return answer;
-    } catch (e) {
-      this.saveHistory(true);
-      throw new PromptError(e.message, e);
-    }
   }
 
   async _executeChatGPT() {
