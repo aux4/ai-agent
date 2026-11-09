@@ -1,5 +1,45 @@
 # Release notes
 
+## Sign in with ChatGPT — use your ChatGPT plan without an API key
+
+`aux4 ai agent auth login` signs in with the same "Sign in with ChatGPT" OAuth flow used by
+OpenAI's own tools (PKCE, a loopback callback on `127.0.0.1`, ID-token signature verification).
+Credentials are saved under `~/.config/aux4-ai-agent/` with `0600`/`0700` permissions and
+refreshed automatically. Once signed in:
+
+```bash
+aux4 ai agent auth models   # list models available to your plan
+aux4 ai agent auth status   # check who is signed in
+aux4 ai agent auth logout   # revoke and sign out
+```
+
+Set `api: chatgpt` and a model from `auth models` to use it:
+
+```yaml
+config:
+  agent:
+    model:
+      api: chatgpt
+      config:
+        model: gpt-6.1-sol
+```
+
+Requests go to `https://api.openai.com/v1/responses` with `store:false`, streamed, authenticated
+with the signed-in bearer token. `api: codex` (the older, `codex`-CLI-dependent path reading
+`~/.codex/auth.json`) still works unchanged for existing configs, but `api: chatgpt` is now the
+recommended, self-contained way to use ChatGPT plan credits.
+
+## Built-in tools are now dispatched as `aux4 ai agent tool` commands
+
+The model's only bindable tool is `executeAux4`. File, search, reference, skill, and
+user-interaction operations that used to be separate model-visible tools (`readFile`, `writeFile`,
+`searchFiles`, `askUser`, etc.) are now `aux4 ai agent tool <name>` CLI commands — discoverable
+with `aux4 ai agent tool --help` — invoked through `executeAux4` like any other aux4 command. This
+keeps every tool call going through the same permission/guardrail path as other aux4 commands, and
+shrinks the per-request tool schema the model sees to one entry. Behavior and permission checks
+for each operation are unchanged; only how the model invokes them changed. The `--tools` flag on
+`aux4 ai agent ask` is now a deprecated no-op (only `executeAux4` is ever bound).
+
 ## A permission denial now says what you may run instead
 
 `Permission denied: command "aux4 calendar next" is not allowed by the permissions configuration.`

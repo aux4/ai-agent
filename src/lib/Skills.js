@@ -87,7 +87,7 @@ export function loadSkillsCatalog(skillsDir) {
   const sections = [];
 
   if (skills.length > 0) {
-    sections.push(`The following skills are available. Use the \`readSkill\` tool to read a skill's full instructions when you need to apply it.
+    sections.push(`The following local skills are available. Use \`executeAux4\` to run \`aux4 ai agent tool read-skill --help\`, then read a skill with the JSON field shown by help (for example, \`aux4 ai agent tool read-skill '{"skill":"name"}'\`).
 
 | Skill | Description |
 |-------|-------------|

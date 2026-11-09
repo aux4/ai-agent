@@ -12,12 +12,12 @@ Key features:
 - **Conversation history** — maintain multi-turn conversations via a history JSON file
 - **Structured output** — constrain responses to a JSON schema
 - **Streaming** — print tokens as they arrive with `--stream true`
-- **Built-in tools** — the agent can call tools (readFile, writeFile, editFile, searchFiles, executeAux4, askUser, etc.) during execution
-- **askUser tool** — when the agent needs clarification it can prompt the user interactively; in non-interactive sessions it proceeds with best judgment
+- **Command based tools** — the model only receives `executeAux4`; built-in file, search, reference, skill, and utility operations are commands under `aux4 ai agent tool` (discover them with `aux4 ai agent tool --help`)
+- **Ask user command** — when the agent needs clarification it can use `aux4 ai agent tool ask-user`; in non-interactive sessions it proceeds with best judgment
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
 - **Model selection** — choose a named model from a registry with `--useModel` instead of passing inline model JSON
-- **Codex** — set `api: codex` in the model config to use OpenAI models with your ChatGPT subscription via `~/.codex/auth.json`
+- **ChatGPT plan usage** — sign in with `aux4 ai agent auth login`, then set `api: chatgpt` and a model from `aux4 ai agent auth models`; `api: codex` (OAuth via the separate `codex` CLI) is still supported for existing configs
 
 #### Usage
 
@@ -63,7 +63,7 @@ Compaction config fields:
 
 **Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).
 
-**Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand using the `readSkill` tool. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
+**Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand via `aux4 ai agent tool read-skill`. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
 
 #### Example
 
@@ -149,8 +149,8 @@ With a named model from registry:
 aux4 ai agent ask --configFile config.yaml --config agent --useModel fast "What is 2+2?"
 ```
 
-With Codex (ChatGPT subscription, no API key needed):
+With ChatGPT plan usage (no API key needed):
 
 ```bash
-aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "What time is it?"
+aux4 ai agent ask --model '{"api":"chatgpt","config":{"model":"gpt-6.1-sol"}}' "What time is it?"
 ```

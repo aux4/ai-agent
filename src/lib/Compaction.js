@@ -96,7 +96,7 @@ export async function summarizeMessages(messages, modelConfig, options = {}) {
   const prompt = loadSummarizationPrompt(options.promptFile);
 
   // Use direct API if provided (for models using OAuth instead of API keys)
-  const directApi = options.codexApi || options.geminiCliApi;
+  const directApi = options.responsesApi || options.geminiCliApi;
   if (directApi) {
     const result = await directApi.execute([
       { role: "system", content: prompt },
@@ -146,7 +146,7 @@ export async function compactMessages(messages, modelConfig, options = {}) {
 
   const summaryContent = await summarizeMessages(messagesToSummarize, modelConfig, {
     promptFile: options.promptFile,
-    codexApi: options.codexApi
+    responsesApi: options.responsesApi
   });
 
   // Append file tracking to the structured summary

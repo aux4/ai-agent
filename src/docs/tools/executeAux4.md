@@ -19,7 +19,16 @@ executeAux4("aux4 google gmail list --query is:unread")
 
 ## Discovering commands
 
-Commands are grouped into profiles, so explore top-down:
+Commands are grouped into profiles, so explore top-down. For the agent's built-in file,
+search, reference, skill, and user-interaction capabilities, discover the command group
+first and then drill into the selected command:
+
+1. `aux4 ai agent tool --help` — list built-in agent commands
+2. `aux4 ai agent tool <command> --help` — inspect the command input fields
+3. Pass the documented JSON object as the final argument, for example
+   `aux4 ai agent tool read-file '{"file":"AGENTS.md"}'`
+
+For other aux4 commands:
 
 1. `aux4 aux4 pkger list --filter <keyword>` — find the package that covers a capability
 2. `aux4 --help` — list the top-level commands
@@ -31,7 +40,8 @@ Commands are grouped into profiles, so explore top-down:
 This tool runs **only aux4 commands** — one per call. It is not a shell: other programs,
 pipes, redirects, and command chaining (`;` `&&` `||` `|` `` ` `` `$()` `>`) are rejected.
 To post-process output, use the aux4 command's own flags, or read the result and reason
-about it yourself.
+about it yourself. To read package references, use `aux4 ai agent tool read-reference`
+instead of a direct `readReference` tool call.
 
 For large-output handling, timeouts, stdin, and config, call `readReference("executeAux4.md")`.
 

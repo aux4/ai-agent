@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-
 import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { getModel } from "./Models.js";
@@ -8,10 +7,11 @@ import { createAwsSigV4Fetch } from "./AwsSigV4Fetch.js";
 import { readFile, asJson } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
-import Tools, { createTools } from "./Tools.js";
+import { createTools } from "./Tools.js";
 import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
-import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
+import { ChatGPTApi } from "./ChatGPTApi.js";
+import { getChatGPTAuth } from "./ChatGPTAuth.js";
 import { CodexApi } from "./CodexApi.js";
 import { loadCodexAuth } from "./TokenRefresh.js";
 import { GeminiCliApi } from "./GeminiCliApi.js";
@@ -38,15 +38,26 @@ class Prompt {
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
-    this.mcpClient = null;
     this.apiType = config.api || "chat";
 
     if (this.apiType === "codex") {
+      // Legacy path: relies on the separate `codex` CLI's own login flow and
+      // ~/.codex/auth.json. Kept for backward compatibility (aux4/agent-connector
+      // still configures api: codex). Prefer api: chatgpt — self-contained OAuth
+      // via 'aux4 ai agent auth login', no external CLI required.
       const codexAuth = loadCodexAuth();
       if (!codexAuth) {
-        throw new PromptError("Codex auth not found. Run 'codex login' first.");
+        throw new PromptError("Codex auth not found. Run 'codex login' first, or switch to api: chatgpt and run 'aux4 ai agent auth login'.");
       }
       this.codexApi = new CodexApi({ ...(config.config || {}), ...codexAuth });
+    } else if (this.apiType === "chatgpt") {
+      if (!getChatGPTAuth()) {
+        throw new PromptError("ChatGPT sign-in not found. Run 'aux4 ai agent auth login' first.");
+      }
+      if (!config.config?.model) {
+        throw new PromptError("Choose a model from 'aux4 ai agent auth models' and set it as model in the chatgpt config.");
+      }
+      this.responsesApi = new ChatGPTApi(config.config || {});
     } else if (this.apiType === "gemini-cli") {
       const geminiAuth = loadGeminiAuth();
       if (!geminiAuth) {
@@ -94,46 +105,20 @@ class Prompt {
     }
 
     // Create tools with configuration if provided
-    const configuredTools = Object.keys(this.toolsConfig).length > 0 ? createTools(this.toolsConfig) : Tools;
-
-    const mcpConfigPath = path.join(process.cwd(), "mcp.json");
-    let mcpTools = [];
-
-    if (fs.existsSync(mcpConfigPath)) {
-      try {
-        const mcpConfig = JSON.parse(fs.readFileSync(mcpConfigPath, "utf-8"));
-        this.mcpClient = new MultiServerMCPClient({ ...mcpConfig });
-        mcpTools = await this.mcpClient.getTools();
-      } catch (e) {
-        console.error("Error reading mcp.json:", e.message);
-      }
-    }
+    const configuredTools = createTools({ ...this.toolsConfig, tools: ["executeAux4"] });
 
     if (this.apiType === "codex") {
-      this.codexApi.bindTools(Object.values(configuredTools));
-      if (mcpTools.length > 0) {
-        this.codexApi.bindTools(mcpTools);
-      }
-      this.tools = {
-        ...configuredTools,
-        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
-      };
+      this.codexApi.bindTools([configuredTools.executeAux4]);
+      this.tools = { executeAux4: configuredTools.executeAux4 };
+    } else if (this.apiType === "chatgpt") {
+      this.responsesApi.bindTools([configuredTools.executeAux4]);
+      this.tools = { executeAux4: configuredTools.executeAux4 };
     } else if (this.apiType === "gemini-cli") {
-      this.geminiCliApi.bindTools(Object.values(configuredTools));
-      if (mcpTools.length > 0) {
-        this.geminiCliApi.bindTools(mcpTools);
-      }
-      this.tools = {
-        ...configuredTools,
-        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
-      };
+      this.geminiCliApi.bindTools([configuredTools.executeAux4]);
+      this.tools = { executeAux4: configuredTools.executeAux4 };
     } else {
-      const allTools = [...Object.values(configuredTools), ...mcpTools];
-      this.model = this.model.bindTools(allTools);
-      this.tools = {
-        ...configuredTools,
-        ...mcpTools.reduce((acc, tool) => { acc[tool.name] = tool; return acc; }, {})
-      };
+      this.model = this.model.bindTools([configuredTools.executeAux4]);
+      this.tools = { executeAux4: configuredTools.executeAux4 };
     }
   }
 
@@ -251,6 +236,10 @@ class Prompt {
 
     if (this.apiType === "codex") {
       return await this._executeCodex();
+    }
+
+    if (this.apiType === "chatgpt") {
+      return await this._executeChatGPT();
     }
 
     if (this.apiType === "gemini-cli") {
@@ -594,7 +583,60 @@ class Prompt {
             this.messages = await compactMessages(this.messages, compactionModel, {
               keepLastMessages: this.compactionConfig.keepLastMessages || 6,
               promptFile: this.compactionConfig.promptFile,
-              codexApi: (!this.compactionConfig.model && this.apiType === "codex") ? this.codexApi : null
+              responsesApi: (!this.compactionConfig.model && this.apiType === "codex") ? this.codexApi : null
+            });
+            this.compacted = true;
+          } catch (err) {
+            console.error(`[compact] Warning: ${err.message}`);
+          }
+        }
+      }
+
+      this.saveHistory(true);
+      return answer;
+    } catch (e) {
+      this.saveHistory(true);
+      throw new PromptError(e.message, e);
+    }
+  }
+
+  async _executeChatGPT() {
+    try {
+      const result = await this.responsesApi.execute(this.messages, {
+        streaming: this.streaming && !this.outputSchema,
+        tokenCallback: this.tokenCallback,
+        outputSchema: this.outputSchema
+      });
+
+      this.tokenUsage.input += result.usage.input || 0;
+      this.tokenUsage.output += result.usage.output || 0;
+      this.tokenUsage.cached += result.usage.cached || 0;
+      this.tokenUsage.total += (result.usage.input || 0) + (result.usage.output || 0);
+
+      let answer = result.answer;
+
+      if (this.outputSchema) {
+        let jsonStr = answer.trim();
+        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+        if (codeBlockMatch) {
+          jsonStr = codeBlockMatch[1].trim();
+        }
+        const zodSchema = buildZodSchema(this.outputSchema);
+        const parsed = zodSchema.parse(JSON.parse(jsonStr));
+        answer = JSON.stringify(parsed);
+      }
+
+      this.messages.push({ role: "assistant", content: answer, timestamp: Date.now() });
+
+      if (this.compactionConfig && this.compactionConfig.contextWindow) {
+        const promptTokens = result.usage.input || 0;
+        if (shouldCompact(promptTokens, this.compactionConfig)) {
+          const compactionModel = this.compactionConfig.model || this.config;
+          try {
+            this.messages = await compactMessages(this.messages, compactionModel, {
+              keepLastMessages: this.compactionConfig.keepLastMessages || 6,
+              promptFile: this.compactionConfig.promptFile,
+              responsesApi: (!this.compactionConfig.model && this.apiType === "chatgpt") ? this.responsesApi : null
             });
             this.compacted = true;
           } catch (err) {
@@ -741,10 +783,7 @@ class Prompt {
   }
 
   async close() {
-    if (!this.mcpClient) return;
-
-    await this.mcpClient.close();
-    this.mcpClient = null;
+    return;
   }
 }
 

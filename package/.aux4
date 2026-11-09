@@ -228,7 +228,7 @@
               },
               {
                 "name": "tools",
-                "text": "Optional comma-separated allow-list of tool names to bind (e.g. executeAux4,readReference); empty binds all tools",
+                "text": "Deprecated compatibility option; only executeAux4 is exposed to the model",
                 "default": ""
               },
               {
@@ -561,12 +561,43 @@
           }
         },
         {
+          "name": "auth",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs auth values(action)"
+          ],
+          "help": {
+            "text": "Sign in to ChatGPT, list available plan models, check status, or sign out",
+            "variables": [
+              {
+                "name": "action",
+                "text": "Authentication action",
+                "arg": true,
+                "options": [
+                  "login",
+                  "models",
+                  "status",
+                  "logout"
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "policy",
           "execute": [
             "profile:ai:agent:policy"
           ],
           "help": {
             "text": "Policy guardrail utilities (check decisions, resolve escalations)"
+          }
+        },
+        {
+          "name": "tool",
+          "execute": [
+            "profile:ai:agent:tool"
+          ],
+          "help": {
+            "text": "Run a built-in agent tool command"
           }
         }
       ]
@@ -641,6 +672,266 @@
                   "widen",
                   "stop"
                 ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ai:agent:tool",
+      "commands": [
+        {
+          "name": "read-file",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool read-file value(input)"
+          ],
+          "help": {
+            "text": "Read a file",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: file (required), offset and limit (optional).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "write-file",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool write-file value(input)"
+          ],
+          "help": {
+            "text": "Write a file",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: file and content (both required).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "edit-file",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool edit-file value(input)"
+          ],
+          "help": {
+            "text": "Edit a file",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: file, old_string, new_string (required); replace_all (optional boolean).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "save-image",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool save-image value(input)"
+          ],
+          "help": {
+            "text": "Save image data",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: imageName and content (both required; content is base64).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "list-files",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool list-files value(input)"
+          ],
+          "help": {
+            "text": "List files",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: path, recursive and exclude (all optional).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "search-files",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool search-files value(input)"
+          ],
+          "help": {
+            "text": "Search file contents",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: pattern (required); path, include, exclude and maxResults (optional).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "create-directory",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool create-directory value(input)"
+          ],
+          "help": {
+            "text": "Create a directory",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON field: path (required).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "remove-files",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool remove-files value(input)"
+          ],
+          "help": {
+            "text": "Remove agent-created files",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON field: files (required; string or array of paths).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "search-context",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool search-context value(input)"
+          ],
+          "help": {
+            "text": "Search indexed context",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: query (required); storage, limit, source, embeddingsType and embeddingsConfig (optional).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "ask-user",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool ask-user value(input)"
+          ],
+          "help": {
+            "text": "Ask the user a question",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON field: question (required).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "current-date-time",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool current-date-time value(input)"
+          ],
+          "help": {
+            "text": "Get the current date and time",
+            "variables": [
+              {
+                "name": "input",
+                "text": "Pass an empty JSON object: {}.",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "read-reference",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool read-reference value(input)"
+          ],
+          "help": {
+            "text": "Read a reference",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON field: file (optional; omit to list references).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "read-skill",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool read-skill value(input)"
+          ],
+          "help": {
+            "text": "Read an installed skill",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON field: skill (optional; omit to list skills).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "search-text",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool search-text value(input)"
+          ],
+          "help": {
+            "text": "Search text",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON fields: file and query (required); limit (optional).",
+                "default": "{}",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "aux4-skill",
+          "execute": [
+            "node ${packageDir}/lib/aux4-ai-agent.cjs tool aux4-skill value(input)"
+          ],
+          "help": {
+            "text": "Get aux4 skill information",
+            "variables": [
+              {
+                "name": "input",
+                "text": "JSON field: skill (optional; omit to list installed skills).",
+                "default": "{}",
+                "arg": true
               }
             ]
           }

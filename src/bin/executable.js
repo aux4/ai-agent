@@ -25,6 +25,8 @@ import { rememberExecutor } from "./commands/RememberExecutor.js";
 import { modelsExecutor } from "./commands/ModelsExecutor.js";
 import { policyCheckExecutor } from "./commands/PolicyCheckExecutor.js";
 import { policyResolveExecutor } from "./commands/PolicyResolveExecutor.js";
+import { chatGPTAuthExecutor } from "../lib/ChatGPTAuth.js";
+import { toolExecutor } from "./commands/ToolExecutor.js";
 
 process.title = "aux4-agent";
 
@@ -49,7 +51,7 @@ function parsePolicyArg(value) {
 
     if (!command) {
       console.log("Usage: aux4-agent <command> [options]");
-      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
+      console.log("Commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, auth, tool, policy-check, policy-resolve");
       process.exit(1);
     }
 
@@ -147,6 +149,10 @@ function parsePolicyArg(value) {
       await modelsExecutor({
         models: JSON.parse(args[1] || "{}")
       });
+    } else if (command === "auth") {
+      await chatGPTAuthExecutor({ action: args[1] });
+    } else if (command === "tool") {
+      await toolExecutor({ name: args[1], input: args[2] || "{}" });
     } else if (command === "policy-check") {
       await policyCheckExecutor({
         policy: parsePolicyArg(args[1]),
@@ -164,7 +170,7 @@ function parsePolicyArg(value) {
       });
     } else {
       console.error(`Unknown command: ${command}`.red);
-      console.log("Available commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, policy-check, policy-resolve");
+      console.log("Available commands: learn, search, forget, ask, image, history, summarize, remember, compact, models, auth, tool, policy-check, policy-resolve");
       process.exit(1);
     }
   } catch (e) {

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import crypto from "node:crypto";
 import { spawn, spawnSync } from "child_process";
 import readline from "node:readline";
 import { z } from "zod";
@@ -29,8 +30,36 @@ import searchTextDesc from "../docs/tools/searchText.md?raw";
 import aux4SkillDesc from "../docs/tools/aux4Skill.md?raw";
 import { listSkills, listInstalledSkills } from "./Skills.js";
 
-// Array to track files and directories created by the agent
-const createdPaths = [];
+// Persist agent-created paths across `aux4 ai agent tool ...` command processes.
+// The per-cwd temp file keeps removeFiles' safety check intact when each command
+// runs in its own aux4 invocation.
+const createdPathsFile = path.join(os.tmpdir(), `aux4-agent-created-${crypto.createHash("sha256").update(`${process.getuid?.() || "user"}:${path.resolve(process.cwd())}`).digest("hex").slice(0, 20)}.json`);
+let createdPaths = [];
+try {
+  const stored = JSON.parse(fs.readFileSync(createdPathsFile, "utf8"));
+  if (Array.isArray(stored)) createdPaths = stored.filter(item => typeof item === "string");
+} catch {}
+
+function persistCreatedPaths() {
+  const temp = `${createdPathsFile}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temp, JSON.stringify(createdPaths), { mode: 0o600 });
+    fs.renameSync(temp, createdPathsFile);
+  } catch {
+    try { fs.rmSync(temp, { force: true }); } catch {}
+  }
+}
+
+function trackCreatedPath(filePath) {
+  if (!createdPaths.includes(filePath)) createdPaths.push(filePath);
+  persistCreatedPaths();
+}
+
+function untrackCreatedPath(filePath) {
+  const index = createdPaths.indexOf(filePath);
+  if (index >= 0) createdPaths.splice(index, 1);
+  persistCreatedPaths();
+}
 
 // Serialization queue for askUser to prevent parallel stdin conflicts
 let askUserQueue = Promise.resolve();
@@ -137,7 +166,7 @@ export const writeLocalFileTool = tool(
 
       // Track the created file only if it's new
       if (!fileExists) {
-        createdPaths.push(filePath);
+        trackCreatedPath(filePath);
       }
 
       return "file created";
@@ -299,7 +328,7 @@ export const createDirectoryTool = tool(
     fs.mkdirSync(directory, { recursive: true });
 
     // Track the created directory
-    createdPaths.push(directory);
+    trackCreatedPath(directory);
 
     return "directory created";
   },
@@ -315,7 +344,7 @@ export const createDirectoryTool = tool(
 const DEFAULT_TIMEOUT = 60000;
 const MAX_OUTPUT_LENGTH = 10000;
 
-function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
+function executeWithTimeout(cmd, { stdin, timeout, cwd, env, inheritStdin = false } = {}) {
   const timeoutMs = timeout === 0 ? 0 : (timeout ? timeout * 1000 : DEFAULT_TIMEOUT);
 
   const tmpDir = os.tmpdir();
@@ -335,14 +364,17 @@ function executeWithTimeout(cmd, { stdin, timeout, cwd } = {}) {
     }
 
     const spawnOptions = {
-      stdio: ["pipe", stdoutFd, stderrFd],
+      stdio: [inheritStdin ? "inherit" : "pipe", stdoutFd, inheritStdin ? "inherit" : stderrFd],
       detached: false,
     };
     if (cwd) spawnOptions.cwd = cwd;
+    if (env) spawnOptions.env = { ...process.env, ...env };
 
     const child = spawn("sh", ["-c", cmd], spawnOptions);
 
-    if (stdin) {
+    if (inheritStdin) {
+      // Interactive built-in commands (ask-user) need the caller's terminal.
+    } else if (stdin) {
       child.stdin.write(stdin);
       child.stdin.end();
     } else {
@@ -595,6 +627,24 @@ export function checkPermission(subject, permissions = {}) {
   return "deny";
 }
 
+function checkCommandPermission(command, fullCommand, permissions = {}) {
+  const subjects = [command, fullCommand].map(parseSubject);
+  const matchesAny = (patterns = []) => patterns.some(rawPattern => {
+    const parsed = parsePattern(rawPattern);
+    return subjects.some(subject => subject.type === "command"
+      && parsed.type === "command"
+      && matchesPattern(subject.value, parsed.pattern));
+  });
+
+  // Deny/ask patterns take precedence if either spelling matches. This lets allow
+  // rules continue matching the legacy stripped command while deny rules cannot be
+  // diluted by a broad allow rule that matches the prefixed spelling.
+  if (matchesAny(permissions.deny)) return "deny";
+  if (matchesAny(permissions.ask)) return "ask";
+  if (matchesAny(permissions.allow || ["*"])) return "allow";
+  return "deny";
+}
+
 // System-level deny list — always blocked, cannot be overridden by config
 const SYSTEM_DENY = ["secret*get*", "jobs run*op *", "jobs run*secret*get*"];
 
@@ -672,7 +722,7 @@ function validateAux4Only(fullCommand) {
   return null;
 }
 
-export const createExecuteAux4Tool = (permissions) => tool(
+export const createExecuteAux4Tool = (permissions, commandContext = {}) => tool(
   async ({ command: rawCommand, stdin, timeout, cwd }) => {
     // Full-command form: the model writes the command exactly as typed in a terminal,
     // including the leading `aux4` ("aux4 X" = auxiliary for X, so `aux4 aux4 pkger ...`
@@ -694,16 +744,8 @@ export const createExecuteAux4Tool = (permissions) => tool(
     // Permission patterns may be written in either form (stripped, as agents configured
     // them before; or full, matching what actually runs). Deny wins if EITHER form is
     // denied; allow needs only one form to match, so existing configs keep working.
-    const strippedDecision = checkPermission(command, permissions);
-    const fullDecision = checkPermission(fullCommand, permissions);
-    const decision =
-      strippedDecision === "deny" && fullDecision === "deny"
-        ? "deny"
-        : strippedDecision === "allow" || fullDecision === "allow"
-          ? "allow"
-          : strippedDecision === "ask" || fullDecision === "ask"
-            ? "ask"
-            : "deny";
+    const isAgentToolCommand = /^aux4 ai agent tool(?:\s|$)/i.test(fullCommand);
+    const decision = isAgentToolCommand ? "allow" : checkCommandPermission(command, fullCommand, permissions);
 
     if (decision === "deny") {
       return `Permission denied: command "${fullCommand}" is not allowed by the permissions configuration.${allowedHint(permissions)}`;
@@ -739,7 +781,11 @@ export const createExecuteAux4Tool = (permissions) => tool(
     }
 
     try {
-      const result = await executeWithTimeout(fullCommand, { stdin, timeout, cwd });
+      const env = isAgentToolCommand
+        ? { AUX4_AI_AGENT_TOOL_CONTEXT: JSON.stringify({ ...commandContext, permissions, toolUsage: commandContext.getUsage?.() || {} }) }
+        : undefined;
+      const inheritStdin = /^aux4 ai agent tool ask-user(?:\s|$)/i.test(fullCommand) && process.stdin.isTTY;
+      const result = await executeWithTimeout(fullCommand, { stdin, timeout, cwd, env, inheritStdin });
       return result;
     } catch (error) {
       if (error.timedOut) {
@@ -867,7 +913,7 @@ export const createWriteFileTool = (permissions) => tool(
 
       const fileExists = fs.existsSync(filePath);
       fs.writeFileSync(filePath, content, { encoding: "utf-8" });
-      if (!fileExists) createdPaths.push(filePath);
+      if (!fileExists) trackCreatedPath(filePath);
 
       return "file created";
     } catch (e) {
@@ -955,7 +1001,7 @@ export const createSaveImageTool = (permissions) => tool(
 
       const fileExists = fs.existsSync(filePath);
       fs.writeFileSync(filePath, buffer);
-      if (!fileExists) createdPaths.push(filePath);
+      if (!fileExists) trackCreatedPath(filePath);
 
       return `Image saved to ${imageName}`;
     } catch (e) {
@@ -1000,8 +1046,7 @@ export const createRemoveFilesTool = (permissions) => tool(
 
         if (!fs.existsSync(filePath)) {
           results.push(`${file}: File or directory not found`);
-          const index = createdPaths.indexOf(filePath);
-          if (index > -1) createdPaths.splice(index, 1);
+          untrackCreatedPath(filePath);
           continue;
         }
 
@@ -1014,8 +1059,7 @@ export const createRemoveFilesTool = (permissions) => tool(
             fs.unlinkSync(filePath);
             results.push(`${file}: File removed successfully`);
           }
-          const index = createdPaths.indexOf(filePath);
-          if (index > -1) createdPaths.splice(index, 1);
+          untrackCreatedPath(filePath);
         } catch (removeError) {
           results.push(`${file}: Error removing - ${removeError.message}`);
         }
@@ -1208,7 +1252,7 @@ export const saveImageTool = tool(
 
       // Track the created file only if it's new
       if (!fileExists) {
-        createdPaths.push(filePath);
+        trackCreatedPath(filePath);
       }
 
       return `Image saved to ${imageName}`;
@@ -1257,10 +1301,7 @@ export const removeFilesTool = tool(
         if (!fs.existsSync(filePath)) {
           results.push(`${file}: File or directory not found`);
           // Remove from tracking even if it doesn't exist
-          const index = createdPaths.indexOf(filePath);
-          if (index > -1) {
-            createdPaths.splice(index, 1);
-          }
+          untrackCreatedPath(filePath);
           continue;
         }
 
@@ -1275,10 +1316,7 @@ export const removeFilesTool = tool(
           }
 
           // Remove from tracking array
-          const index = createdPaths.indexOf(filePath);
-          if (index > -1) {
-            createdPaths.splice(index, 1);
-          }
+          untrackCreatedPath(filePath);
         } catch (removeError) {
           results.push(`${file}: Error removing - ${removeError.message}`);
         }
@@ -1822,6 +1860,12 @@ function wrapWithPolicy(name, underlyingTool, policy, getUsage) {
       const cleanArgs = { ...args };
       delete cleanArgs.__policyCallId;
 
+      // Built-in operations are command-dispatched through executeAux4. Their own
+      // named policy checks run in ToolExecutor, preserving the original policy subjects.
+      if (name === "executeAux4" && /^aux4 ai agent tool(?:\s|$)/i.test(cleanArgs.command || "")) {
+        return underlyingTool.invoke(cleanArgs);
+      }
+
       const usage = (getUsage && getUsage()) || {};
       const calls = usage.calls || 0;
 
@@ -1851,7 +1895,10 @@ export function createTools(config = {}) {
     searchFiles: permissions ? createSearchFilesTool(permissions) : searchFilesTool,
     createDirectory: createDirectoryTool,
     removeFiles: permissions ? createRemoveFilesTool(permissions) : removeFilesTool,
-    executeAux4: permissions ? createExecuteAux4Tool(permissions) : executeAux4CliTool,
+    executeAux4: createExecuteAux4Tool(permissions || {}, {
+      storage, references, skills, policySpec: config.policySpec, runId: config.runId,
+      costs: config.costs, getUsage
+    }),
     searchContext: createSearchContextTool(storage, embeddingsConfig),
     askUser: createAskUserTool(),
     currentDateTime: currentDateTimeTool,

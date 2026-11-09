@@ -5,7 +5,7 @@ Lightweight AI agent runtime for aux4 with RAG, tool usage, image generation, an
 - Ingest documents into a local vector store and run semantic queries (learn + search)
 - Ask questions to a configured LLM with optional context or images
 - Generate images from text prompts
-- Let the agent call local aux4 commands as tools during conversations
+- Let the agent run local aux4 commands during conversations (`executeAux4` is its only model tool)
 - Inspect conversation history and run interactive chat loops
 
 ## Installation
@@ -643,9 +643,46 @@ For more details see [aux4 ai agent models](./commands/ai/agent/models).
 
 ---
 
-## Codex
+## Sign in with ChatGPT
 
-Use OpenAI models with your ChatGPT subscription instead of an API key. Set `api: codex` in the model config to use the Codex endpoint with OAuth tokens from `~/.codex/auth.json`.
+Eligible ChatGPT Plus and Pro users can use their ChatGPT plan for Responses API requests without an OpenAI API key. Sign in with ChatGPT once:
+
+```bash
+aux4 ai agent auth login
+```
+
+List models available to the signed-in account, inspect the current sign-in, or sign out:
+
+```bash
+aux4 ai agent auth models
+aux4 ai agent auth status
+aux4 ai agent auth logout
+```
+
+Select a model returned by `auth models` in your config:
+
+```yaml
+config:
+  agent:
+    model:
+      api: chatgpt
+      config:
+        model: gpt-6.1-sol
+```
+
+Or inline:
+
+```bash
+aux4 ai agent ask --model '{"api":"chatgpt","config":{"model":"gpt-6.1-sol"}}' "What time is it?"
+```
+
+The sign-in uses OpenAI's open-source Sign in with ChatGPT flow, saves protected local credentials under `~/.config/aux4-ai-agent/`, refreshes them as needed, and sends streamed requests to `https://api.openai.com/v1/responses` with `store:false`. Model availability depends on the signed-in account. Usage and access can be managed from ChatGPT Settings.
+
+---
+
+## Codex (legacy)
+
+`api: codex` is kept for backward compatibility with configs created before `aux4 ai agent auth` existed. It uses the separate `codex` CLI's own login flow and OAuth tokens from `~/.codex/auth.json`, instead of aux4's self-contained sign-in. **New setups should use [Sign in with ChatGPT](#sign-in-with-chatgpt) (`api: chatgpt`) instead** — it does not require installing another CLI.
 
 ### Prerequisites
 
@@ -677,43 +714,31 @@ aux4 ai agent ask --model '{"api":"codex","config":{"model":"gpt-5.3-codex"}}' "
 - Reads OAuth tokens from `~/.codex/auth.json` (created by `codex login`)
 - Refreshes the access token before each API call (tokens are short-lived)
 - Calls `chatgpt.com/backend-api/codex/responses` instead of `api.openai.com`
-- All built-in tools, streaming, history, compaction, and skills work the same way
+- `executeAux4` tool, streaming, history, compaction, and skills work the same way as `api: chatgpt`
 - Persists refreshed tokens back to `~/.codex/auth.json` for other tools to use
 
 ---
 
 ## Built-in Tools
 
-The agent comes with a set of built-in tools that the LLM can call during execution. These tools run locally and are always available:
+The model receives only `executeAux4`. File, search, reference, skill, and utility operations are exposed as CLI commands under `aux4 ai agent tool`; the model discovers them with `aux4 ai agent tool --help` and invokes them through `executeAux4`.
 
-| Tool | Description |
+| Command | Description |
 |------|-------------|
-| `readFile` | Read the contents of a text file |
-| `writeFile` | Create or overwrite a file |
-| `editFile` | Perform partial string replacements in a file |
-| `listFiles` | List files in a directory |
-| `searchFiles` | Search file contents for a text pattern |
-| `createDirectory` | Create a new directory |
-| `removeFiles` | Remove files or directories created by the agent |
-| `saveImage` | Save a base64-encoded image to disk |
-| `executeAux4` | Run any aux4 command |
-| `searchContext` | Query the local vector store for relevant context |
-| `askUser` | Ask the user a question and wait for their typed response |
-| `currentDateTime` | Get the current date and time in local and UTC formats |
-| `readReference` | List or read reference documents from the references directory |
-| `readSkill` | List or read skill definitions from the skills directory |
+| `read-file` / `write-file` / `edit-file` | Read or modify files |
+| `list-files` / `search-files` / `search-text` | Browse and search files |
+| `create-directory` / `remove-files` / `save-image` | File operations |
+| `search-context` | Query the local vector store |
+| `ask-user` / `current-date-time` | User interaction and runtime information |
+| `read-reference` / `read-skill` / `aux4-skill` | Discover references, skills, and aux4 guidance |
 
-### askUser
+Each command accepts a JSON object as its positional argument. Use command help to see its input description.
 
-The `askUser` tool lets the agent prompt the user interactively when it needs clarification, a preference, or a decision before proceeding. The question is displayed on stderr and the user types their response on stdin.
-
-**Non-interactive sessions:** When no TTY is available (e.g., piped input), the tool returns a message telling the agent to proceed with its best judgment.
-
-**Note:** The agent is instructed to always call `askUser` alone, never in parallel with other tools, to avoid stdin conflicts.
+The commands preserve the existing tool behavior and permission checks. Their JSON argument object follows the underlying operation's input schema; use `aux4 ai agent tool <command> --help` for the command syntax.
 
 ### searchFiles
 
-The `searchFiles` tool performs a case-insensitive text search across project files. It supports filtering by file extension, excluding directories, and limiting results. The agent uses this to find relevant code or content without reading every file.
+The `search-files` command performs a case-insensitive text search across project files. It supports filtering by file extension, excluding directories, and limiting results. The agent uses this to find relevant code or content without reading every file.
 
 ### currentDateTime
 
@@ -787,7 +812,7 @@ aux4 ai agent ask "How do I deploy?" --references ./docs/references
 
 ## Skills
 
-Skills let you provide on-demand capability instructions to the agent using a folder-based convention compatible with Claude Code, Cursor, and the Open Agent Skills specification. Instead of putting everything in `AGENTS.md`, place detailed skill instructions in an `.agents/skills/` directory and the agent will discover them at startup and read their full content on demand using the `readSkill` tool.
+Skills let you provide on-demand capability instructions to the agent using a folder-based convention compatible with Claude Code, Cursor, and the Open Agent Skills specification. Instead of putting everything in `AGENTS.md`, place detailed skill instructions in an `.agents/skills/` directory and the agent will discover them at startup and read their full content on demand using `aux4 ai agent tool read-skill`.
 
 ### Folder Structure
 
@@ -1035,9 +1060,9 @@ aux4 ai agent policy check "db delete users" --tool executeAux4 \
 ## Tools
 
 Overview
-The agent can call local aux4 commands (tools) during execution. This enables safe tool use patterns like looking up or running local commands, generating data with small auxiliary commands, or calling other package commands.
+The agent can invoke local aux4 commands during execution through its `executeAux4` tool. This enables safe tool use patterns like looking up or running local commands, generating data with small auxiliary commands, or calling other package commands.
 
-The agent can call local aux4 commands during execution.
+The model receives only `executeAux4`; built-in capabilities are exposed as `aux4 ai agent tool` commands.
 
 Example tool definition (a simple `.aux4` command):
 

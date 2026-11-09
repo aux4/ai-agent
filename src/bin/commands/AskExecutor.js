@@ -35,7 +35,12 @@ export async function askExecutor(params) {
     const bio = params.bio;
     const permissions = params.permissions;
     const references = params.references || (params.packageDir ? path.join(params.packageDir, "references") : "");
-    const skills = params.skills || "skills";
+    let skills = params.skills || "skills";
+    // Keep the historical local `skills/` convention usable when the newer default
+    // `.agents/skills/` directory has not been created in the working project.
+    if (skills === ".agents/skills" && !fs.existsSync(skills) && fs.existsSync("skills")) {
+      skills = "skills";
+    }
 
     // Optional policy guardrails. An inline policy object (aux4 delivers a config.yaml
     // object param as a JSON string for free, parsed upstream). Absent => no policy =>
@@ -85,16 +90,10 @@ export async function askExecutor(params) {
     if (skills) {
       toolsConfig.skills = skills;
     }
-    // Optional tool allow-list. Accepts an array or a comma-separated string
-    // (e.g. --tools "executeAux4,readReference"). Binds ONLY those tools, so the
-    // model's per-request tool-description context shrinks to what the task needs.
-    let toolNames = params.tools;
-    if (typeof toolNames === "string") {
-      toolNames = toolNames.split(",").map(t => t.trim()).filter(Boolean);
-    }
-    if (Array.isArray(toolNames) && toolNames.length > 0) {
-      toolsConfig.tools = toolNames;
-    }
+    toolsConfig.policySpec = hasPolicy ? policySpec : null;
+    toolsConfig.runId = policy?.runId || params.runId || "";
+    toolsConfig.costs = params.costs || {};
+    // `tools` remains accepted for CLI compatibility; only executeAux4 is exposed.
 
     const prompt = new Prompt(model, toolsConfig, { compaction, policy });
     await prompt.init();
@@ -121,7 +120,7 @@ export async function askExecutor(params) {
       await prompt.instructions(skillsCatalog);
     }
 
-    await prompt.instructions("If you need to ask the user a question or need clarification, use the askUser tool. Always call askUser alone, never in parallel with other tools.");
+    await prompt.instructions("Only executeAux4 is available as a model tool. Built-in capabilities are aux4 commands, not callable model tools. When a request, prior instruction, or skill mentions a legacy built-in tool name (such as readFile, writeFile, searchFiles, readSkill, readReference, currentDateTime, or askUser), treat it as a capability hint and discover the current command by calling aux4 ai agent tool --help, then aux4 ai agent tool <subcommand> --help. Use the JSON input fields shown by help and invoke that full command through executeAux4. Do not claim you lack file or skill access before trying the relevant command. Use aux4 ai agent tool read-skill for local skills configured by --skills. When asked what skills are available, report the local skills listed in the system catalog; query aux4 ai skill list only when asked specifically for installed aux4 skills. If the user asks you to ask them something, use aux4 ai agent tool ask-user.");
 
     await prompt.history(history);
 
