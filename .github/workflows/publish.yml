@@ -40,6 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # faiss-node (package/lib runtime dep) compiles from source when its prebuilt binary can't be
+      # downloaded (GitHub release assets) or doesn't match the runner's Node ABI; that build needs BLAS/LAPACK.
+      - name: Install BLAS/LAPACK for faiss-node
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -61,6 +66,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      # faiss-node (package/lib runtime dep) compiles from source when its prebuilt binary can't be
+      # downloaded (GitHub release assets) or doesn't match the runner's Node ABI; that build needs BLAS/LAPACK.
+      - name: Install BLAS/LAPACK for faiss-node
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -102,6 +112,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # faiss-node (package/lib runtime dep) compiles from source when its prebuilt binary can't be
+      # downloaded (GitHub release assets) or doesn't match the runner's Node ABI; that build needs BLAS/LAPACK.
+      - name: Install BLAS/LAPACK for faiss-node
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -112,11 +127,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      # faiss-node (package/lib runtime dep) compiles from source when no prebuild matches the
-      # runner's Node ABI; its CMake build needs BLAS/LAPACK.
-      - name: Install BLAS/LAPACK for faiss-node
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
 
       - name: Mint prod hub publish token
         id: mint
