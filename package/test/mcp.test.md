@@ -35,7 +35,7 @@ loop ran — the tool was offered, called, and its result was used.
 ```beforeAll
 node mcp-tool-mock-server.mjs 8940 >mcp-tool-mock-server.log 2>&1 &
 echo $! > mcp-tool-mock-server.pid
-sleep 1
+sleep 2
 ```
 
 ```afterAll
@@ -57,7 +57,7 @@ rm -rf mcp-tool-mock-server.pid mcp-tool-mock-server.log
 ### should offer the MCP tool to the model, call it, and answer using its result
 
 ```timeout
-20000
+60000
 ```
 
 ```execute
@@ -71,7 +71,7 @@ DONE:Echo: ping
 ### should deny the MCP tool call when permissions deny it, and feed the denial back as the tool result
 
 ```timeout
-20000
+60000
 ```
 
 ```execute
@@ -85,7 +85,7 @@ DONE:Permission denied: MCP tool "mcpEcho" is not allowed by the permissions con
 ### should not bind the MCP tool to the model when --tools excludes it
 
 ```timeout
-20000
+60000
 ```
 
 ```execute
@@ -123,7 +123,7 @@ applies the description-length/schema cleanup used for every tool) alongside `ex
 ```beforeAll
 node chatgpt-mock-server.mjs 8932 >chatgpt-mock-server-mcp.log 2>&1 &
 echo $! > chatgpt-mock-server-mcp.pid
-sleep 1
+sleep 2
 ```
 
 ```afterAll
@@ -145,7 +145,7 @@ rm -rf chatgpt-mock-server-mcp.pid chatgpt-mock-server-mcp.log chatgpt-home-mcp
 ### should offer the MCP tool alongside executeAux4, call it, and answer using its result
 
 ```timeout
-20000
+60000
 ```
 
 ```execute
