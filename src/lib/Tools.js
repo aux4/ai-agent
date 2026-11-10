@@ -1935,6 +1935,106 @@ export function createTools(config = {}) {
   return base;
 }
 
+// Wrap each MCP-provided tool (from mcp.json / MultiServerMCPClient) with the same
+// permission + policy + loop-detection layers the built-ins get, so an MCP server is not a
+// backdoor around the rest of the security model. Subjects are namespaced `mcp:<toolName>` in
+// the permissions config, so a config can target a specific MCP tool (`{"deny":["mcp:deleteFile"]}`)
+// without affecting executeAux4's own `aux4 <command>` subjects. With no matching pattern the
+// default allow (`["*"]`) applies -- the same "every tool bound, nothing gated" behaviour MCP
+// tools had before permission checking existed for them.
+export function createMcpTools(mcpTools, config = {}) {
+  const { permissions, policy, getUsage } = config;
+
+  const wrapped = {};
+  for (const mcpTool of mcpTools) {
+    const name = mcpTool.name;
+
+    let wrappedTool = tool(
+      async (args) => {
+        const subject = `mcp:${name}`;
+        const decision = checkPermission(subject, permissions || {});
+
+        if (decision === "deny") {
+          return `Permission denied: MCP tool "${name}" is not allowed by the permissions configuration.`;
+        }
+
+        if (decision === "ask") {
+          if (!process.stdin.isTTY) {
+            return `Permission denied: MCP tool "${name}" requires user confirmation but session is non-interactive.`;
+          }
+
+          const confirmed = await new Promise((resolve) => {
+            askUserQueue = askUserQueue.then(async () => {
+              const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+              process.stderr.write(`\n🔒 The agent wants to call MCP tool: ${name}\nAllow? (Y/n) > `);
+              const answer = await new Promise((res) => {
+                rl.on("line", (line) => { rl.close(); res(line); });
+                rl.on("close", () => res(""));
+              });
+              resolve(answer.trim() === "" || answer.trim().toLowerCase() === "y");
+            });
+          });
+
+          if (!confirmed) {
+            return `MCP tool "${name}" was denied by the user.`;
+          }
+        }
+
+        return mcpTool.invoke(args);
+      },
+      {
+        name,
+        description: mcpTool.description || (mcpTool.lc_kwargs && mcpTool.lc_kwargs.description) || name,
+        schema: mcpTool.schema
+      }
+    );
+
+    // MCP tools run arbitrary external-server code, same risk class as executeAux4 -- gate
+    // them under policy (budget/allow/deny/escalate) when a policy is configured.
+    if (policy) {
+      wrappedTool = wrapWithPolicy(name, wrappedTool, policy, getUsage);
+    }
+    wrappedTool = wrapWithLoopDetection(name, wrappedTool);
+
+    wrapped[name] = wrappedTool;
+  }
+  return wrapped;
+}
+
+// Parse the `--tools` comma-separated allow-list into a trimmed, non-empty array, or null when
+// unset/empty -- null means "no filtering, bind everything" (unchanged default behaviour).
+export function parseToolsAllowList(toolsSpec) {
+  if (!toolsSpec || typeof toolsSpec !== "string") return null;
+  const names = toolsSpec
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  return names.length > 0 ? names : null;
+}
+
+// Apply a `--tools` allow-list to the already-assembled tool pool (executeAux4 and any MCP
+// tools share one flat namespace). No list = every tool stays bound. An unknown name throws,
+// listing the valid names for THIS run's actual tool set (built-ins + whatever mcp.json added).
+export function applyToolsAllowList(allowList, allTools) {
+  if (!allowList) return allTools;
+
+  const validNames = Object.keys(allTools);
+  const unknown = allowList.filter((name) => !validNames.includes(name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown tool${unknown.length > 1 ? "s" : ""} in --tools: ${unknown.join(", ")}. `
+      + `Valid tools: ${validNames.join(", ")}`
+    );
+  }
+
+  const allowSet = new Set(allowList);
+  const filtered = {};
+  for (const [name, toolInstance] of Object.entries(allTools)) {
+    if (allowSet.has(name)) filtered[name] = toolInstance;
+  }
+  return filtered;
+}
+
 const Tools = {
   readFile: readLocalFileTool,
   writeFile: writeLocalFileTool,

@@ -76,6 +76,36 @@ const server = http.createServer(async (req, res) => {
     try { parsed = JSON.parse(body); } catch {}
     const auth = req.headers.authorization || "";
 
+    // Scripted MCP round trip for the api: chatgpt path: first call -> emit a function_call
+    // for the MCP tool; second call (the tool's output is now in `input`) -> final answer
+    // echoing it back. Proves MCP tools pass through ResponsesApi#bindTools (name/description/
+    // schema limits) alongside executeAux4, for this api type too.
+    if (parsed.model === "mock-mcp-tool-model") {
+      const toolNames = (parsed.tools || []).map(t => t.name);
+      const hasExecuteAux4 = toolNames.includes("executeAux4");
+      const hasMcpEcho = toolNames.includes("mcpEcho");
+      const toolOutput = (parsed.input || []).find(item => item.type === "function_call_output");
+
+      let outputText = "";
+      let output = [];
+      if (!hasExecuteAux4 || !hasMcpEcho) {
+        outputText = `MISSING_TOOLS:${toolNames.join(",") || "none"}`;
+      } else if (!toolOutput) {
+        output = [{ type: "function_call", call_id: "call_mcp_1", name: "mcpEcho", arguments: JSON.stringify({ text: "ping" }) }];
+      } else {
+        outputText = `DONE:${toolOutput.output}`;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({
+        type: "response.completed",
+        response: { output_text: outputText, output, usage: { input_tokens: 3, output_tokens: 2 } }
+      })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
     const problems = [];
     if (parsed.model !== "mock-chatgpt-model") problems.push("model");
     if (parsed.store !== false) problems.push("store");

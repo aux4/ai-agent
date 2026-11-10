@@ -228,7 +228,7 @@
               },
               {
                 "name": "tools",
-                "text": "Deprecated compatibility option; only executeAux4 is exposed to the model",
+                "text": "Comma-separated allow-list of tool names to bind (executeAux4 plus any MCP tools from mcp.json); unlisted names are not exposed to the model. Empty: bind everything",
                 "default": ""
               },
               {

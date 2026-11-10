@@ -1110,6 +1110,73 @@ For more details see the related command docs:
 - The example tool command is available at [aux4 print-name](./commands/print-name) after installing or configuring it locally.
 - Agent calls are documented under [aux4 ai agent ask](./commands/ai/agent/ask) and [aux4 ai agent history](./commands/ai/agent/history).
 
+### Limiting which tools are bound (`--tools`)
+
+By default every tool is bound to the model: `executeAux4` plus any tools contributed by MCP
+servers (see below). `--tools` takes a comma-separated allow-list that narrows that pool —
+unlisted tools are not sent to the model at all:
+
+```bash
+aux4 ai agent ask "use the mcp tool" --config --tools executeAux4,myMcpTool
+```
+
+An unknown name in the list is an error, and the error message lists the valid names for that
+run's actual tool set (built-ins plus whatever `mcp.json` added):
+
+```text
+Unknown tool in --tools: typo. Valid tools: executeAux4, myMcpTool
+```
+
+---
+
+## MCP Servers
+
+The agent can connect to [MCP](https://modelcontextprotocol.io) servers and bind their tools to
+the model alongside `executeAux4` — for every `api` type, including `api: chatgpt`. Add an
+`mcp.json` file to the directory you run the agent from:
+
+```json
+{
+  "mcpServers": {
+    "time": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--init", "mcp/time"]
+    }
+  }
+}
+```
+
+`mcpServers` maps a server name to how to start it (stdio transport: `command` + `args`, and an
+optional `env`). Any server that implements the standard MCP stdio protocol works — local
+binaries, `npx`-launched servers, or containerized ones like the example above.
+
+```bash
+aux4 ai agent ask "what time is it in UTC?" --config
+```
+
+When `mcp.json` is present, its servers are started once per run and their tools are discovered
+automatically — no extra flags needed. MCP tool calls go through the same permission and policy
+checks as the built-ins (see [Permissions](#permissions) and [Policy Guardrails](#policy-guardrails)
+below): an MCP tool's subject is `mcp:<toolName>`, so a specific tool can be gated independently
+of `executeAux4`'s own `aux4 <command>` subjects:
+
+```yaml
+config:
+  my-agent:
+    permissions:
+      deny:
+        - "mcp:deleteFile"
+```
+
+With no matching pattern, the default (`allow: ["*"]`) applies, so an unconfigured `mcp.json`
+behaves the same as before permission checking existed for MCP tools — every discovered tool is
+bound and callable.
+
+**Note:** `mcp.json` is read from the current working directory, not from the package
+directory — put it alongside wherever you run `aux4 ai agent ask`/`chat` from.
+
+Use `--tools` (above) to bind only a subset of the combined `executeAux4` + MCP tool pool.
+
 ---
 
 ## Debugging

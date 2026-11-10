@@ -12,7 +12,9 @@ Key features:
 - **Conversation history** — maintain multi-turn conversations via a history JSON file
 - **Structured output** — constrain responses to a JSON schema
 - **Streaming** — print tokens as they arrive with `--stream true`
-- **Command based tools** — the model only receives `executeAux4`; built-in file, search, reference, skill, and utility operations are commands under `aux4 ai agent tool` (discover them with `aux4 ai agent tool --help`)
+- **Command based tools** — the model receives `executeAux4` (built-in file, search, reference, skill, and utility operations are commands under `aux4 ai agent tool`, discovered with `aux4 ai agent tool --help`) plus any tools contributed by MCP servers configured in `mcp.json`
+- **MCP servers** — drop an `mcp.json` file (`{"mcpServers": {"<name>": {"command": ..., "args": [...]}}}`) in the working directory and its servers' tools are bound to the model alongside `executeAux4`, for every `api` type. MCP tool calls go through the same permission/policy checks as the built-ins, under the `mcp:<toolName>` subject. See the MCP Servers section in the README
+- **`--tools` allow-list** — a comma-separated list of tool names (`executeAux4` plus any MCP tools) to bind; unlisted tools are not exposed to the model. Empty/unset binds everything (the default)
 - **Ask user command** — when the agent needs clarification it can use `aux4 ai agent tool ask-user`; in non-interactive sessions it proceeds with best judgment
 - **Permissions** — control which aux4 commands and file operations the agent can perform using allow/ask/deny pattern lists
 - **Policy guardrails** — an optional, enforced, swappable layer on top of permissions: per-run token/cost/call budgets, narrowing allow/deny rules, and escalation triggers (see `--policy`)
@@ -22,7 +24,7 @@ Key features:
 #### Usage
 
 ```bash
-aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--policy <json>] [--runId <id>] [--costs <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] <question>
+aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <json>] [--role <role>] [--history <file>] [--outputSchema <file>] [--context <true|false>] [--image <paths>] [--storage <dir>] [--stream <true|false>] [--autoCompact <true|false>] [--compaction <json>] [--permissions <json>] [--models <json>] [--useModel <name>] [--references <dir>] [--skills <dir>] [--tools <names>] [--policy <json>] [--runId <id>] [--costs <json>] <question>
 ```
 
 --baseInstructions  Base instructions file loaded before the main instructions — an immutable base-prompt layer (default: "")
@@ -45,6 +47,7 @@ aux4 ai agent ask [--baseInstructions <file>] [--instructions <file>] [--bio <js
 --useModel       Named model from registry to use for this request; falls back to default model if name is not found (default: "")
 --references     Path to the references directory (default: ${packageDir}/references)
 --skills         Path to the skills directory (default: skills)
+--tools          Comma-separated allow-list of tool names to bind (executeAux4 plus any MCP tools from mcp.json); unlisted names are not exposed to the model (default: "" — bind everything)
 question         The question to ask (positional argument)
 
 Permissions control which aux4 commands and file operations the agent can perform. Patterns are evaluated in order: deny, ask, allow. Command patterns match tool executions (e.g., `hello`, `deploy*`). File patterns use the format `file:<scope>:<glob>` where scope is `read`, `write`, or `delete` (e.g., `file:write:*.env`, `file:read:*`). See the Permissions section in the README for full details.
@@ -64,6 +67,10 @@ Compaction config fields:
 **Base instructions (`--baseInstructions`):** Pass a path to a file whose contents are loaded as system instructions **before** the main `--instructions` file. This is the immutable base-prompt layer: shared, always-on discipline that should not be overridden by the per-task instructions layered on top. The load order is: agent identity (`--bio`) → base instructions (`--baseInstructions`) → main instructions (`--instructions`).
 
 **Skills directory:** When `--skills` points to a directory containing skill definitions, the agent discovers available skills at startup and can read their full instructions on demand via `aux4 ai agent tool read-skill`. Each skill is a subdirectory with a `SKILL.md` file containing YAML frontmatter (`name`, `description`) and markdown instructions. See the Skills section in the README for the folder structure.
+
+**MCP servers:** When an `mcp.json` file exists in the current working directory, each configured server is started and its tools are bound to the model alongside `executeAux4` — for every `api` type, including `api: chatgpt`. MCP tool calls go through the same permission/policy layer as the built-ins, under the subject `mcp:<toolName>` (independent of `executeAux4`'s own `aux4 <command>` subjects), so a specific MCP tool can be allowed/asked/denied without touching the rest of the permissions config. With no matching pattern the default allow (`["*"]`) applies. See the MCP Servers section in the README.
+
+**`--tools` allow-list:** A comma-separated list narrowing which tools — from the combined `executeAux4` + MCP pool — are actually bound to the model. Unlisted tools are not sent to the model at all (not merely blocked at call time). An unknown name is an error, listing the valid names for that run's actual tool set. Empty/unset binds every tool (unchanged default behavior).
 
 #### Example
 
@@ -153,4 +160,10 @@ With ChatGPT plan usage (no API key needed):
 
 ```bash
 aux4 ai agent ask --model '{"api":"chatgpt","config":{"model":"gpt-6.1-sol"}}' "What time is it?"
+```
+
+With an MCP server (`mcp.json` in the current directory) and `--tools` limiting the model to just that one tool:
+
+```bash
+aux4 ai agent ask --config --tools get_current_time "What time is it in UTC?"
 ```

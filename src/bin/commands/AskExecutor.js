@@ -93,7 +93,11 @@ export async function askExecutor(params) {
     toolsConfig.policySpec = hasPolicy ? policySpec : null;
     toolsConfig.runId = policy?.runId || params.runId || "";
     toolsConfig.costs = params.costs || {};
-    // `tools` remains accepted for CLI compatibility; only executeAux4 is exposed.
+    // Comma-separated allow-list filtering the bound executeAux4 + MCP tool pool. Empty/unset
+    // means every tool stays bound (see Tools.js#parseToolsAllowList/applyToolsAllowList).
+    if (params.tools) {
+      toolsConfig.tools = params.tools;
+    }
 
     const prompt = new Prompt(model, toolsConfig, { compaction, policy });
     await prompt.init();
@@ -120,7 +124,7 @@ export async function askExecutor(params) {
       await prompt.instructions(skillsCatalog);
     }
 
-    await prompt.instructions("Only executeAux4 is available as a model tool. Built-in capabilities are aux4 commands, not callable model tools. When a request, prior instruction, or skill mentions a legacy built-in tool name (such as readFile, writeFile, searchFiles, readSkill, readReference, currentDateTime, or askUser), treat it as a capability hint and discover the current command by calling aux4 ai agent tool --help, then aux4 ai agent tool <subcommand> --help. Use the JSON input fields shown by help and invoke that full command through executeAux4. Do not claim you lack file or skill access before trying the relevant command. Use aux4 ai agent tool read-skill for local skills configured by --skills. When asked what skills are available, report the local skills listed in the system catalog; query aux4 ai skill list only when asked specifically for installed aux4 skills. If the user asks you to ask them something, use aux4 ai agent tool ask-user.");
+    await prompt.instructions("executeAux4 is the only built-in model tool; any additional tools you see are from MCP servers configured in mcp.json. Built-in capabilities are aux4 commands, not callable model tools. When a request, prior instruction, or skill mentions a legacy built-in tool name (such as readFile, writeFile, searchFiles, readSkill, readReference, currentDateTime, or askUser), treat it as a capability hint and discover the current command by calling aux4 ai agent tool --help, then aux4 ai agent tool <subcommand> --help. Use the JSON input fields shown by help and invoke that full command through executeAux4. Do not claim you lack file or skill access before trying the relevant command. Use aux4 ai agent tool read-skill for local skills configured by --skills. When asked what skills are available, report the local skills listed in the system catalog; query aux4 ai skill list only when asked specifically for installed aux4 skills. If the user asks you to ask them something, use aux4 ai agent tool ask-user.");
 
     await prompt.history(history);
 
@@ -140,7 +144,7 @@ export async function askExecutor(params) {
 
     await prompt.message(message, params, role);
 
-    prompt.close();
+    await prompt.close();
   } catch (error) {
     if (error instanceof PromptError) {
       console.error("Prompt error:", error.message);

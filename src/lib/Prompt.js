@@ -7,8 +7,9 @@ import { createAwsSigV4Fetch } from "./AwsSigV4Fetch.js";
 import { readFile, asJson } from "./util/FileUtils.js";
 import { buildZodSchema } from "./util/SchemaUtils.js";
 import mime from "mime-types";
-import { createTools } from "./Tools.js";
+import { createTools, createMcpTools, parseToolsAllowList, applyToolsAllowList } from "./Tools.js";
 import { CONSEQUENTIAL_TOOLS as CONSEQUENTIAL_POLICY_TOOLS } from "./Policy.js";
+import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { shouldCompact, compactMessages } from "./Compaction.js";
 import { ChatGPTApi } from "./ChatGPTApi.js";
 import { getChatGPTAuth } from "./ChatGPTAuth.js";
@@ -36,6 +37,7 @@ class Prompt {
     this.messages = [];
     this.tokenUsage = { input: 0, output: 0, cached: 0, total: 0 };
     this.toolCallCount = 0;
+    this.mcpClient = null;
     this.apiType = config.api || "chat";
 
     if (this.apiType === "codex") {
@@ -105,16 +107,48 @@ class Prompt {
     // Create tools with configuration if provided
     const configuredTools = createTools({ ...this.toolsConfig, tools: ["executeAux4"] });
 
-    if (this.apiType === "chatgpt") {
-      this.responsesApi.bindTools([configuredTools.executeAux4]);
-      this.tools = { executeAux4: configuredTools.executeAux4 };
-    } else if (this.apiType === "gemini-cli") {
-      this.geminiCliApi.bindTools([configuredTools.executeAux4]);
-      this.tools = { executeAux4: configuredTools.executeAux4 };
-    } else {
-      this.model = this.model.bindTools([configuredTools.executeAux4]);
-      this.tools = { executeAux4: configuredTools.executeAux4 };
+    // mcp.json (same discovery as before: read from the current working directory) wires in
+    // any MCP servers' tools alongside executeAux4, for every api type. Permission/policy
+    // checking for MCP tools lives in createMcpTools (see Tools.js) -- mirrors the built-ins.
+    const mcpConfigPath = path.join(process.cwd(), "mcp.json");
+    let mcpToolsRaw = [];
+
+    if (fs.existsSync(mcpConfigPath)) {
+      try {
+        const mcpConfig = JSON.parse(fs.readFileSync(mcpConfigPath, "utf-8"));
+        this.mcpClient = new MultiServerMCPClient({ ...mcpConfig });
+        mcpToolsRaw = await this.mcpClient.getTools();
+      } catch (e) {
+        console.error("Error reading mcp.json:", e.message);
+      }
     }
+
+    const mcpTools = mcpToolsRaw.length > 0
+      ? createMcpTools(mcpToolsRaw, {
+        permissions: this.toolsConfig.permissions,
+        policy: this.policy,
+        getUsage: this.toolsConfig.getUsage
+      })
+      : {};
+
+    let allTools = { executeAux4: configuredTools.executeAux4, ...mcpTools };
+
+    // Optional `--tools` allow-list: filters the combined executeAux4 + MCP pool. Unknown
+    // names throw (the aux4 command surfaces the error to the caller) rather than silently
+    // binding everything.
+    const allowList = parseToolsAllowList(this.toolsConfig.tools);
+    allTools = applyToolsAllowList(allowList, allTools);
+
+    const toolList = Object.values(allTools);
+
+    if (this.apiType === "chatgpt") {
+      this.responsesApi.bindTools(toolList);
+    } else if (this.apiType === "gemini-cli") {
+      this.geminiCliApi.bindTools(toolList);
+    } else {
+      this.model = this.model.bindTools(toolList);
+    }
+    this.tools = allTools;
   }
 
   async instructions(text, params) {
@@ -721,7 +755,10 @@ class Prompt {
   }
 
   async close() {
-    return;
+    if (!this.mcpClient) return;
+
+    await this.mcpClient.close();
+    this.mcpClient = null;
   }
 }
 

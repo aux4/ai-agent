@@ -1,5 +1,27 @@
 # Release notes
 
+## MCP support restored — `mcp.json` tools are bound alongside `executeAux4` again
+
+1.3.20 dropped `mcp.json` / MCP server support while switching built-ins to tool-dispatched
+commands (`aux4 ai agent tool <name>`); `--tools` on `ask` also became a silent no-op. Both are
+restored:
+
+- An `mcp.json` file in the working directory (`{"mcpServers": {"<name>": {"command": ...,
+  "args": [...]}}}`) is loaded again, and each configured server's tools are bound to the model
+  alongside `executeAux4` — for **every** `api` type, including `api: chatgpt` (MCP tools pass
+  through `ResponsesApi#bindTools`, so the same description-length/schema cleanup applies). MCP
+  clients are closed on exit.
+- MCP tool calls now go through the same permission and policy checks as the built-ins (they did
+  not before 1.3.20 either): the subject is `mcp:<toolName>`, independent of `executeAux4`'s own
+  `aux4 <command>` subjects. With no matching pattern the default allow (`["*"]`) applies, so an
+  unconfigured `mcp.json` behaves exactly as it did before permission checking existed for MCP
+  tools.
+- `--tools` is a real allow-list again: a comma-separated list of tool names (`executeAux4` plus
+  any MCP tools) to bind; unlisted tools are not exposed to the model at all. Unknown names are a
+  clear error listing the valid names for that run, instead of a silent no-op.
+
+See the MCP Servers section in the README and `aux4 aux4 man ai_agent__ask`.
+
 ## Codex provider removed — `api: codex` is now a deprecated alias for `api: chatgpt`
 
 The separate Codex OAuth path (the `codex`-CLI-dependent provider reading `~/.codex/auth.json`)
