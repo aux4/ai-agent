@@ -4,7 +4,6 @@
   "description": "Runtime dependencies for aux4 AI Agent CLI",
   "private": true,
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.81",
-    "openai": "^6.49.0"
+    "@napi-rs/canvas": "^0.1.81"
   }
 }
