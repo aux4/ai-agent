@@ -1734,7 +1734,9 @@ export const createSearchContextTool = (defaultStorage, defaultEmbeddingsConfig 
         "--embeddings", JSON.stringify(ragEmbeddings)
       ];
       if (source) ragArgs.push("--source", source);
-      ragArgs.push(query);
+      // Use --query=<value> rather than a bare positional so a query that looks
+      // like an option (e.g. "--help") isn't misparsed as a flag by aux4 itself.
+      ragArgs.push(`--query=${query}`);
 
       const result = spawnSync("aux4", ragArgs, {
         encoding: "utf-8",

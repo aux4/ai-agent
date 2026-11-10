@@ -1,5 +1,24 @@
 # Release notes
 
+## RAG moved to the independent `aux4/ai-rag` package
+
+Document ingestion, vector storage, and retrieval no longer live in `aux4/ai-agent` — they are
+owned by the standalone `aux4/ai-rag` package, which ai-agent now depends on:
+
+- `learn`, `search`, and `forget` are no longer defined here. `aux4/ai-rag` contributes them under
+  the same `aux4 ai agent` namespace, so the public commands are unchanged for users who have both
+  packages installed.
+- The `searchContext` tool used by `ask`/`chat` now delegates to `aux4 ai agent search` (provided
+  by `aux4/ai-rag`) instead of loading a FAISS store directly. A query is passed as
+  `--query=<value>` rather than a bare positional, so a query that happens to look like a flag
+  (e.g. `--help`) is not misparsed.
+- `LlmStore`, `Embeddings`/`DatabricksEmbeddings`, the document loaders/splitters, and `faiss-node`
+  are gone from this package's runtime (`package/lib`) and its dependencies — install
+  `aux4/ai-rag` to keep `learn`/`search`/`forget`/`searchContext` working.
+
+See the Retrieval and semantic search section in the README and `aux4 aux4 man ai_agent__learn` /
+`ai_agent__search` / `ai_agent__forget`.
+
 ## MCP support restored — `mcp.json` tools are bound alongside `executeAux4` again
 
 1.3.20 dropped `mcp.json` / MCP server support while switching built-ins to tool-dispatched

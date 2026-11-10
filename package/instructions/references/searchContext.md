@@ -12,7 +12,7 @@ Search through indexed knowledge bases and document collections using semantic s
 
 ## Overview
 
-This tool provides **intelligent semantic search** through the LlmStore vector database containing indexed documents, code, and knowledge materials. Use it to find specific information, code examples, or contextual knowledge from large document collections that have been processed and indexed by aux4.
+This tool provides **intelligent semantic search** through the vector store (provided by `aux4/ai-rag`) containing indexed documents, code, and knowledge materials. Use it to find specific information, code examples, or contextual knowledge from large document collections that have been processed and indexed by aux4.
 
 ## 🚨 CRITICAL: NEVER MENTION SEARCH ATTEMPTS OR RESULTS
 

@@ -40,11 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # faiss-node (package/lib runtime dep) compiles from source when its prebuilt binary can't be
-      # downloaded (GitHub release assets) or doesn't match the runner's Node ABI; that build needs BLAS/LAPACK.
-      - name: Install BLAS/LAPACK for faiss-node
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -67,10 +62,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # faiss-node (package/lib runtime dep) compiles from source when its prebuilt binary can't be
-      # downloaded (GitHub release assets) or doesn't match the runner's Node ABI; that build needs BLAS/LAPACK.
-      - name: Install BLAS/LAPACK for faiss-node
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
+      # aux4/ai-rag (a dependency, learn/search/forget) only reaches the prod hub when it is
+      # promoted, so off main install it from the dev hub first; the test step below then finds
+      # it already installed (aux4 and pkger too) and installs everything else from the prod hub
+      # as usual.
+      - name: Install aux4/ai-rag from the dev hub
+        if: github.ref_name != 'main'
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aux4.config/packages/aux4/aux4:$PATH"
+          curl -fsSL https://pkger.aux4.sh | sh
+          AUX4_REGISTRY_URL=https://dev.api.hub.aux4.io/v1/packages aux4 aux4 pkger install aux4/ai-rag
+          aux4 aux4 pkger list
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -90,6 +95,21 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
+
+      # aux4/ai-rag (a dependency, learn/search/forget) only reaches the prod hub when it is
+      # promoted, so off main install it from the dev hub first; the test step below then finds
+      # it already installed (aux4 and pkger too) and installs everything else from the prod hub
+      # as usual.
+      - name: Install aux4/ai-rag from the dev hub
+        if: github.ref_name != 'main'
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aux4.config/packages/aux4/aux4:$PATH"
+          curl -fsSL https://pkger.aux4.sh | sh
+          AUX4_REGISTRY_URL=https://dev.api.hub.aux4.io/v1/packages aux4 aux4 pkger install aux4/ai-rag
+          aux4 aux4 pkger list
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -111,11 +131,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      # faiss-node (package/lib runtime dep) compiles from source when its prebuilt binary can't be
-      # downloaded (GitHub release assets) or doesn't match the runner's Node ABI; that build needs BLAS/LAPACK.
-      - name: Install BLAS/LAPACK for faiss-node
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev liblapack-dev
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
