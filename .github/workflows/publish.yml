@@ -34,6 +34,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  AUX4_REGISTRY_URL: ${{ github.ref_name == 'dev' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest

@@ -2013,6 +2013,7 @@ export function createMcpTools(mcpTools, config = {}) {
 // unset/empty -- null means "no filtering, bind everything" (unchanged default behaviour).
 export function parseToolsAllowList(toolsSpec) {
   if (!toolsSpec || typeof toolsSpec !== "string") return null;
+  if (toolsSpec.trim().toLowerCase() === "none") return [];
   const names = toolsSpec
     .split(",")
     .map((name) => name.trim())

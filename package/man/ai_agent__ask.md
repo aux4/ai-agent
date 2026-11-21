@@ -167,3 +167,5 @@ With an MCP server (`mcp.json` in the current directory) and `--tools` limiting 
 ```bash
 aux4 ai agent ask --config --tools get_current_time "What time is it in UTC?"
 ```
+
+Use `--tools none` for plain inference. This disables tool schemas, command execution, MCP discovery, and the local skills catalog. The default tool behavior remains unchanged.

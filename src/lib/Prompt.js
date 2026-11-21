@@ -93,6 +93,13 @@ class Prompt {
   }
 
   async init() {
+    // No-tools mode must skip discovery too: MCP startup can execute processes.
+    const selectedTools = parseToolsAllowList(this.toolsConfig.tools);
+    if (selectedTools && selectedTools.length === 0) {
+      this.tools = {};
+      return;
+    }
+
     // Wire the policy enforcement hook into the tool layer. The hook reads the LIVE
     // accumulated token usage plus the consequential tool call count — no separate
     // ledger. takeDecision lets execute() attach each decision to the history entry.

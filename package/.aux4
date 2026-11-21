@@ -140,7 +140,7 @@
               },
               {
                 "name": "tools",
-                "text": "Comma-separated allow-list of tool names to bind (executeAux4 plus any MCP tools from mcp.json); unlisted names are not exposed to the model. Empty: bind everything",
+                "text": "Comma-separated allow-list of tool names to bind (executeAux4 plus any MCP tools from mcp.json); unlisted names are not exposed to the model. Empty: bind everything; use none for plain inference without tools or MCP discovery",
                 "default": ""
               },
               {
